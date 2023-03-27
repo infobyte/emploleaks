@@ -1,0 +1,4 @@
+{
+   "DB_SETTINGS": {"mysqlhost":"104.248.120.60","mysqluser":"bhtool","mysqlpassword":"12345678!*","mysqldb":"projectBH"},
+   "LINKEDIN_SETTINGS": {"username":"","password":""}
+}
