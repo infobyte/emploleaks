@@ -1,5 +1,4 @@
 import time
-from linkedin_api import Linkedin
 import re
 import pymysql
 import urllib.parse
@@ -130,9 +129,7 @@ class bhtool:
         #profiles = [{'full_name': X ,'profile_name': X,'employee_id': X},...]
         profiles = self.insert_employeesmail_formated(domain_id, self.args.domain, profiles)
 
-        self.api = Linkedin(Helper.userset['username'], Helper.userset['password'])
-
-        self.get_and_insert_linkedin_contact_information(domain_id, profiles)
+        #self.get_and_insert_linkedin_contact_information(domain_id, profiles)
 
     def insert_domain_and_company(self):
         cursor,db = createDbConnection()
@@ -386,44 +383,13 @@ class bhtool:
                 employee_id = cursor.lastrowid
                 profile['employee_id'] = employee_id
 
+                cursor.execute("INSERT INTO LinkedinUsernames(username,checked,employee_id) VALUES(%s,%s,%s);",(profile['profile_name'],'No',profile['employee_id']))
+                db.commit()
             except (pymysql.Error, pymysql.Warning) as e:
                 print(e)
-                break
+                continue
         closeDbConnection(cursor,db)
         return profiles
-
-
-    #================================================================================================================
-
-    def get_and_insert_linkedin_contact_information(self, domain_id, profiles):
-        cursor,db = createDbConnection()
-        for profile in profiles:
-            contact_info_dict = self.api.get_profile_contact_info(profile['profile_name'])
-            if contact_info_dict['email_address'] != [] and contact_info_dict['email_address'] != None:
-                try:
-                    cursor.execute("INSERT INTO PersonalMails(personal_mail_name,leak_checked,employee_id) VALUES(%s,%s,%s);",(contact_info_dict['email_address'],'No',profile['employee_id']))
-                    db.commit()
-                except (pymysql.Error, pymysql.Warning) as e:
-                    pass
-            if contact_info_dict['websites'] != [] and contact_info_dict['websites'] != None:
-                for web in contact_info_dict['websites']:
-                    try:
-                        cursor.execute("INSERT INTO Websites(website,checked,employee_id) VALUES(%s,%s,%s);",(web['url'],'No',profile['employee_id']))
-                        db.commit()
-                    except (pymysql.Error, pymysql.Warning) as e:
-                        pass
-            if contact_info_dict['twitter'] != [] and contact_info_dict['twitter'] != None:
-                for twitter in contact_info_dict['twitter']:
-                    try:
-                        cursor.execute("INSERT INTO TwitterUsernames(username,checked,employee_id) VALUES(%s,%s,%s);",(twitter['name'],'No',profile['employee_id']))
-                        db.commit()
-                    except (pymysql.Error, pymysql.Warning) as e:
-                        pass
-            print("profile inserted")
-
-        closeDbConnection(cursor,db)
-
-
 
 bhtool()
 
