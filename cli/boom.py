@@ -191,10 +191,15 @@ class FirstApp(cmd2.Cmd):
             cmd = args.arg_list[0]
             if cmd == 'stalk':
                 github_username = args.arg_list[1]
+                fields = [['username', 'email']]
+                tab = PrettyTable(fields[0])
+
                 mails = self.plugin_instance.find_mail(github_username)
                 for mail in mails:
-                    #TODO: printear a una tabla pretty
-                    print("user: " + mail['user'] + "\t| mail: " + mail['email'])
+                    fields.append([ mail['user'], mail['email'] ])
+
+                tab.add_rows(fields[1:])
+                print(tab)
   
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
