@@ -150,7 +150,11 @@ class FirstApp(cmd2.Cmd):
     @plugin_activated
     def do_run(self, args):
         if self.plugin_name == 'linkedin':
-            cmd = args.arg_list[0]
+            try:
+                cmd = args.arg_list[0]
+            except IndexError:
+                cmd = 'help'
+
             if cmd == 'seek':
                 company_name = args.arg_list[1]
                 
@@ -165,7 +169,10 @@ class FirstApp(cmd2.Cmd):
                     print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Contacts of: " + profile['full_name'])
                     connections = api.search_people(connection_of=profile['urn'].split(':')[-1], network_depths='F')
                     print(connections)
-                    #import pdb;pdb.set_trace()
+
+            elif cmd == 'help':
+                print("[{Fore.BLUE}*{Style.RESET_ALL}] Not implemented yet. Sorry")
+                #This code is going to call to self.plugin_instance.help()
 
             elif cmd == 'login':
                 username = self.plugin_instance.get_username()
@@ -180,6 +187,15 @@ class FirstApp(cmd2.Cmd):
 
                 else:
                     print(f"[{Fore.RED}-{Style.RESET_ALL}] Fill the options. To see it, use 'show options'.")
+        elif self.plugin_name == 'github':
+            cmd = args.arg_list[0]
+            if cmd == 'stalk':
+                github_username = args.arg_list[1]
+                mails = self.plugin_instance.find_mail(github_username)
+                for mail in mails:
+                    #TODO: printear a una tabla pretty
+                    print("user: " + mail['user'] + "\t| mail: " + mail['email'])
+  
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
                 
