@@ -126,10 +126,12 @@ class FirstApp(cmd2.Cmd):
         table = [['Name', 'Current Setting', 'Required', 'Description']]
         
         for opt in self.plugin_instance.options:
-            if opt['required']:
-                table.append([ opt['name'], opt['value'], 'yes', opt['description']])
-            else:
-                table.append([ opt['name'], opt['value'], 'no', opt['description']])
+            #password = 
+            #if opt['required']:
+            table.append([ opt['name'], opt['value'], "yes" if opt['required'] else "no", opt['description']])
+
+            #else:
+            #    table.append([ opt['name'], opt['value'], 'no', opt['description']])
         
         self.poutput(tabulate(table, headers='firstrow'))
 

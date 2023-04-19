@@ -18,6 +18,11 @@ class LinkedinModule:
                 'value': '',
                 'required': True,
                 'description': "linkedin accout's password"
+            }, {
+                'name': 'hide',
+                'value': 'yes',
+                'required': True,
+                'description': "hide the password field"
             }]
             
         self.session = None
