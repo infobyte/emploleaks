@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import cmd2
 import psycopg2
+import getpass
 
 from colorama import Style, Fore
 from prettytable import PrettyTable
@@ -122,23 +123,16 @@ class FirstApp(cmd2.Cmd):
     @cmd2.with_argparser(parser_show)
     @plugin_activated
     def do_show(self, args):
-        print("Module options:\n")
-        table = [['Name', 'Current Setting', 'Required', 'Description']]
-        
-        for opt in self.plugin_instance.options:
-            #password = 
-            #if opt['required']:
-            table.append([ opt['name'], opt['value'], "yes" if opt['required'] else "no", opt['description']])
-
-            #else:
-            #    table.append([ opt['name'], opt['value'], 'no', opt['description']])
-        
+        table = self.plugin_instance.do_show(args)
         self.poutput(tabulate(table, headers='firstrow'))
 
     @plugin_activated
     def do_setopt(self, args):
         name = args.arg_list[0]
-        value = args.arg_list[1]
+        try:
+            value = args.arg_list[1]
+        except IndexError:
+            value = getpass.getpass(prompt= name+": ")
 
         for opt in self.plugin_instance.options:
             if opt['name'] == name:

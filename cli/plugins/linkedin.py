@@ -21,7 +21,7 @@ class LinkedinModule:
             }, {
                 'name': 'hide',
                 'value': 'yes',
-                'required': True,
+                'required': False,
                 'description': "hide the password field"
             }]
             
@@ -32,6 +32,19 @@ class LinkedinModule:
 
     def get_password(self):
         return self.options[1]['value']
+
+    def do_show(self, args):
+        print("Module options:\n")
+        table = [['Name', 'Current Setting', 'Required', 'Description']]        
+        hide_pass = self.options[2]['value'] == 'yes'
+
+        for opt in self.options:
+            if hide_pass and opt['name'] == 'PASS':
+                table.append([ opt['name'], '*' * len(self.options[1]['value']), 'yes' if opt['required'] else 'no', opt['description']])
+                continue
+            table.append([ opt['name'], opt['value'], 'yes' if opt['required'] else 'no', opt['description']])
+        
+        return table
 
     def login(self):
         username = self.get_username()
