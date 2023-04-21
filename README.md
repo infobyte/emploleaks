@@ -1,4 +1,4 @@
-# 🔎 OSINT Tool for Employee Information Gathering
+# 🔎 Tool for Employee Information Gathering
 
 This is a tool designed for Open Source Intelligence (OSINT) purposes, which helps to gather information about employees of a company.
 
