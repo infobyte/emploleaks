@@ -201,6 +201,12 @@ class FirstApp(cmd2.Cmd):
                 tab.add_rows(fields[1:])
                 print(tab)
   
+        elif self.plugin_name == 'twitter':
+            cmd = args.arg_list[0]
+            if cmd == 'do_something':
+                self.plugin_instance.run()
+            elif cmd == 'help':
+                print("it needs a good help message")
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
                 
