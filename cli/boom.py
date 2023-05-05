@@ -188,7 +188,11 @@ class FirstApp(cmd2.Cmd):
                 else:
                     print(f"[{Fore.RED}-{Style.RESET_ALL}] Fill the options. To see it, use 'show options'.")
         elif self.plugin_name == 'github':
-            cmd = args.arg_list[0]
+            try:
+                cmd = args.arg_list[0]
+            except IndexError:
+                self.plugin_instance.help()
+
             if cmd == 'stalk':
                 github_username = args.arg_list[1]
                 fields = [['username', 'email']]
@@ -200,13 +204,24 @@ class FirstApp(cmd2.Cmd):
 
                 tab.add_rows(fields[1:])
                 print(tab)
+            elif cmd == 'help':
+                self.plugin_instance.help()
+            else:
+                print("Argument {} not recornized".format(cmd))
   
         elif self.plugin_name == 'twitter':
-            cmd = args.arg_list[0]
+            try:
+                cmd = args.arg_list[0]
+            except IndexError:
+                self.plugin_instance.help()
+
             if cmd == 'do_something':
                 self.plugin_instance.run()
             elif cmd == 'help':
-                print("it needs a good help message")
+                self.plugin_instance.help()
+            else:
+                print("Argument {} not recorgnized".format(cmd))
+
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
                 
