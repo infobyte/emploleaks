@@ -216,7 +216,11 @@ class FirstApp(cmd2.Cmd):
                 self.plugin_instance.help()
 
             if cmd == 'do_something':
-                self.plugin_instance.run()
+                try:
+                    self.plugin_instance.run(username = args.arg_list[1])
+                except IndexError:
+                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
+
             elif cmd == 'help':
                 self.plugin_instance.help()
             else:
