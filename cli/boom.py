@@ -37,6 +37,10 @@ parser_use.add_argument('--plugin',
 parser_show = cmd2.Cmd2ArgumentParser()
 parser_show.add_argument('options')
 
+autosave_options = cmd2.Cmd2ArgumentParser()
+autosave_options.add_argument('--enable', action="store_true", default=False)
+autosave_options.add_argument('--disable', action="store_true", default=False)
+
 class FirstApp(cmd2.Cmd):
 
     def __init__(self, connector_db=None, *args, **kwargs):
@@ -44,6 +48,7 @@ class FirstApp(cmd2.Cmd):
         self.conn = connector_db
         self.plugin_name = ''
         self.plugin_instance = None
+        self.autosave = False
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -228,10 +233,31 @@ class FirstApp(cmd2.Cmd):
 
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
-                
+        
+    @cmd2.with_argparser(autosave_options)       
+    def do_autosave(self, args):
+        if args.enable and args.disable:
+            print(f"[{Fore.RED}-{Style.RESET_ALL}] Invalid option, cannot set and unset this feature")
+            return
+        
+        if args.enable:
+            self.autosave = True
+        elif args.disable:
+            self.autosave = False
+        
+        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autosave " + ('enabled' if self.autosave else 'disabled'))
 
 if __name__ == '__main__':
     c = FirstApp()
     c.prompt = f"{Fore.RED}boom{Style.RESET_ALL}> "
-    c.poutput("E1 051nt3rO \U0001F575")
+    ascii_logo = '''
+___________              .__         .__                 __            
+\_   _____/ _____ ______ |  |   ____ |  |   ____ _____  |  | __  ______
+ |    __)_ /     \____  \|  |  /  _ \|  | _/ __ \__   \ |  |/ / /  ___/
+ |        \  Y Y  \  |_> >  |_(  <_> )  |_\  ___/ / __ \|    <  \___ \ 
+/_______  /__|_|  /   __/|____/\____/|____/\___  >____  /__|_ \/____  >
+        \/      \/|__|                         \/     \/     \/     \/ 
+'''
+    c.poutput(ascii_logo)
+    c.poutput("OSINT tool \U0001F575")
     c.cmdloop()
