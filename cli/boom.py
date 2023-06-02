@@ -2,6 +2,8 @@
 import cmd2
 import psycopg2
 import getpass
+import os
+import configparser
 
 from colorama import Style, Fore
 from prettytable import PrettyTable
@@ -48,7 +50,10 @@ class FirstApp(cmd2.Cmd):
         self.conn = connector_db
         self.plugin_name = ''
         self.plugin_instance = None
+
+        self.configfilepath = os.path.join('config', 'tokens.ini')
         self.autosave = False
+        self.autoload = True
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -125,6 +130,19 @@ class FirstApp(cmd2.Cmd):
         elif args.plugin == 'github':
             self.plugin_instance = GithubModule()
 
+        if self.autoload:
+            self.load_options_from_configfile()
+
+    def load_options_from_configfile(self):
+        config = configparser.ConfigParser()
+        config.read(self.configfilepath)
+        
+        for option in config.items(self.plugin_name):
+            for module_option in self.plugin_instance.options:
+                if module_option['name'].upper() == option[0].upper():
+                    module_option['value'] = option[1]
+                    break
+
     @cmd2.with_argparser(parser_show)
     @plugin_activated
     def do_show(self, args):
@@ -139,10 +157,21 @@ class FirstApp(cmd2.Cmd):
         except IndexError:
             value = getpass.getpass(prompt= name+": ")
 
+        if self.autosave:
+            config = configparser.ConfigParser()
+            config.add_section(self.plugin_name)
+
         for opt in self.plugin_instance.options:
             if opt['name'] == name:
                 opt['value'] = value
                 self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Updating value successfull")
+
+                if self.autosave:
+                    config.set(self.plugin_name, name, value)
+                
+                with open(self.configfilepath, 'w') as configfile:
+                    config.write(configfile)
+
                 break
         else:
             self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Option invalid...")
@@ -212,7 +241,7 @@ class FirstApp(cmd2.Cmd):
             elif cmd == 'help':
                 self.plugin_instance.help()
             else:
-                print("Argument {} not recornized".format(cmd))
+                print("Argument {} not recognized".format(cmd))
   
         elif self.plugin_name == 'twitter':
             try:
@@ -246,6 +275,16 @@ class FirstApp(cmd2.Cmd):
             self.autosave = False
         
         print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autosave " + ('enabled' if self.autosave else 'disabled'))
+
+    @cmd2.with_argparser(autosave_options)
+    def do_autoload(self, args):
+        if args.enable:
+            self.autoload = True
+        elif args.disable:
+            self.autoload = False
+
+        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autoload " + ('enabled' if self.autoload else 'disabled'))
+
 
 if __name__ == '__main__':
     c = FirstApp()
