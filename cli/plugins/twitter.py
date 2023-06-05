@@ -36,6 +36,8 @@ class TwitterModule:
                 'required': True,
                 'description': "obfuscate the token in the show options menu"
             }]
+
+        self.client = None
             
     def do_show(self, args):
         print("Module options:\n")
@@ -57,29 +59,30 @@ class TwitterModule:
         consumer_secret = self.options[4]['value']
 
         if bearer_token != '':
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Method not implemented")
+            self.client = tweepy.Client(bearer_token=self.options[0]['value'])
+            info_user = self.client.get_user(username = username, user_fields=['public_metrics', 'location', 'url'])
+            
+            print("Twitter Module")
+            print("==============\n")
+            print("username: {}".format(info_user.data.username))
+            print("name: {}".format(info_user.data.name))
+            print("location: {}".format(info_user.data.location))
+            print("url: {}".format(info_user.data.url))
+            
 
-            client = tweepy.Client(bearer_token=self.options[0]['value'])
-            tweets = client.user_timeline(screen_name="@pastaCLS")
-            query = '#alberso -is:retweet lang:es'
-            tweets = client.search_recent_tweets(query=query, tweet_fields=['context_annotations', 'created_at'], max_results=100)
+    def get_tweets(self, username=None):
+        bearer_token = self.options[0]['value']
         
-            for tweet in tweets.data:
-                print(tweet.text)
+        if bearer_token != '' and self.client != None:
+            user_id = self.client.get_user(username = username).data.id
+            print("Fetching tweets from user: {}".format(user_id))
+            tweets = self.client.get_users_tweets(id=user_id)
             
-        elif access_token != '' and secret_token != '' and consumer_key != '' and consumer_secret != '':
-            print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Connecting to the API through Access and Secret token")
+            if tweets.data != None:
+                print("tweets:")
+                for info in tweets.data:
+                    print(info)
             
-            auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
-            auth.set_access_token(access_token, secret_token)
-            api = tweepy.API(auth)
-            
-            number_of_tweets = 200
-            tweets = api.user_timeline(screen_name = username)
-            
-            for tweet in tweets:
-                print(tweet.text)
-
     def help(self):
         print("This plugin support the following commands:")
         print("\t* get_tweets @username: get_tweets of user")

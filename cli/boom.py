@@ -134,7 +134,7 @@ class FirstApp(cmd2.Cmd):
             self.load_options_from_configfile()
 
     def load_options_from_configfile(self):
-        config = configparser.ConfigParser()
+        config = configparser.RawConfigParser()
         config.read(self.configfilepath)
         
         for option in config.items(self.plugin_name):
@@ -249,9 +249,15 @@ class FirstApp(cmd2.Cmd):
             except IndexError:
                 self.plugin_instance.help()
 
-            if cmd == 'do_something':
+            if cmd == 'get_profile':
                 try:
                     self.plugin_instance.run(username = args.arg_list[1])
+                except IndexError:
+                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
+
+            elif cmd == 'get_tweets':
+                try:
+                    self.plugin_instance.get_tweets(username = args.arg_list[1])
                 except IndexError:
                     print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
 
