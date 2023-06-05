@@ -2,6 +2,8 @@
 import cmd2
 import psycopg2
 import getpass
+import os
+import configparser
 
 from colorama import Style, Fore
 from prettytable import PrettyTable
@@ -37,6 +39,10 @@ parser_use.add_argument('--plugin',
 parser_show = cmd2.Cmd2ArgumentParser()
 parser_show.add_argument('options')
 
+autosave_options = cmd2.Cmd2ArgumentParser()
+autosave_options.add_argument('--enable', action="store_true", default=False)
+autosave_options.add_argument('--disable', action="store_true", default=False)
+
 class FirstApp(cmd2.Cmd):
 
     def __init__(self, connector_db=None, *args, **kwargs):
@@ -44,6 +50,10 @@ class FirstApp(cmd2.Cmd):
         self.conn = connector_db
         self.plugin_name = ''
         self.plugin_instance = None
+
+        self.configfilepath = os.path.join('config', 'tokens.ini')
+        self.autosave = False
+        self.autoload = True
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -120,6 +130,19 @@ class FirstApp(cmd2.Cmd):
         elif args.plugin == 'github':
             self.plugin_instance = GithubModule()
 
+        if self.autoload:
+            self.load_options_from_configfile()
+
+    def load_options_from_configfile(self):
+        config = configparser.RawConfigParser()
+        config.read(self.configfilepath)
+        
+        for option in config.items(self.plugin_name):
+            for module_option in self.plugin_instance.options:
+                if module_option['name'].upper() == option[0].upper():
+                    module_option['value'] = option[1]
+                    break
+
     @cmd2.with_argparser(parser_show)
     @plugin_activated
     def do_show(self, args):
@@ -134,10 +157,21 @@ class FirstApp(cmd2.Cmd):
         except IndexError:
             value = getpass.getpass(prompt= name+": ")
 
+        if self.autosave:
+            config = configparser.ConfigParser()
+            config.add_section(self.plugin_name)
+
         for opt in self.plugin_instance.options:
             if opt['name'] == name:
                 opt['value'] = value
                 self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Updating value successfull")
+
+                if self.autosave:
+                    config.set(self.plugin_name, name, value)
+                
+                with open(self.configfilepath, 'w') as configfile:
+                    config.write(configfile)
+
                 break
         else:
             self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Option invalid...")
@@ -188,7 +222,11 @@ class FirstApp(cmd2.Cmd):
                 else:
                     print(f"[{Fore.RED}-{Style.RESET_ALL}] Fill the options. To see it, use 'show options'.")
         elif self.plugin_name == 'github':
-            cmd = args.arg_list[0]
+            try:
+                cmd = args.arg_list[0]
+            except IndexError:
+                self.plugin_instance.help()
+
             if cmd == 'stalk':
                 github_username = args.arg_list[1]
                 fields = [['username', 'email']]
@@ -200,13 +238,71 @@ class FirstApp(cmd2.Cmd):
 
                 tab.add_rows(fields[1:])
                 print(tab)
+            elif cmd == 'help':
+                self.plugin_instance.help()
+            else:
+                print("Argument {} not recognized".format(cmd))
   
+        elif self.plugin_name == 'twitter':
+            try:
+                cmd = args.arg_list[0]
+            except IndexError:
+                self.plugin_instance.help()
+
+            if cmd == 'get_profile':
+                try:
+                    self.plugin_instance.run(username = args.arg_list[1])
+                except IndexError:
+                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
+
+            elif cmd == 'get_tweets':
+                try:
+                    self.plugin_instance.get_tweets(username = args.arg_list[1])
+                except IndexError:
+                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
+
+            elif cmd == 'help':
+                self.plugin_instance.help()
+            else:
+                print("Argument {} not recorgnized".format(cmd))
+
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
-                
+        
+    @cmd2.with_argparser(autosave_options)       
+    def do_autosave(self, args):
+        if args.enable and args.disable:
+            print(f"[{Fore.RED}-{Style.RESET_ALL}] Invalid option, cannot set and unset this feature")
+            return
+        
+        if args.enable:
+            self.autosave = True
+        elif args.disable:
+            self.autosave = False
+        
+        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autosave " + ('enabled' if self.autosave else 'disabled'))
+
+    @cmd2.with_argparser(autosave_options)
+    def do_autoload(self, args):
+        if args.enable:
+            self.autoload = True
+        elif args.disable:
+            self.autoload = False
+
+        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autoload " + ('enabled' if self.autoload else 'disabled'))
+
 
 if __name__ == '__main__':
     c = FirstApp()
     c.prompt = f"{Fore.RED}boom{Style.RESET_ALL}> "
-    c.poutput("E1 051nt3rO \U0001F575")
+    ascii_logo = '''
+___________              .__         .__                 __            
+\_   _____/ _____ ______ |  |   ____ |  |   ____ _____  |  | __  ______
+ |    __)_ /     \____  \|  |  /  _ \|  | _/ __ \__   \ |  |/ / /  ___/
+ |        \  Y Y  \  |_> >  |_(  <_> )  |_\  ___/ / __ \|    <  \___ \ 
+/_______  /__|_|  /   __/|____/\____/|____/\___  >____  /__|_ \/____  >
+        \/      \/|__|                         \/     \/     \/     \/ 
+'''
+    c.poutput(ascii_logo)
+    c.poutput("OSINT tool \U0001F575")
     c.cmdloop()
