@@ -52,8 +52,9 @@ class FirstApp(cmd2.Cmd):
         self.plugin_instance = None
 
         self.configfilepath = os.path.join('config', 'tokens.ini')
-        self.autosave = False
-        self.autoload = True
+        
+        self.autoload = os.path.isfile(self.configfilepath) # if exists the file autoload = True
+        self.autosave = self.autoload
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -137,11 +138,15 @@ class FirstApp(cmd2.Cmd):
         config = configparser.RawConfigParser()
         config.read(self.configfilepath)
         
-        for option in config.items(self.plugin_name):
-            for module_option in self.plugin_instance.options:
-                if module_option['name'].upper() == option[0].upper():
-                    module_option['value'] = option[1]
-                    break
+        try:
+            for option in config.items(self.plugin_name):
+                for module_option in self.plugin_instance.options:
+                    if module_option['name'].upper() == option[0].upper():
+                        module_option['value'] = option[1]
+                        break
+        except configparser.NoSectionError:
+            print(f"[{Fore.RED}-{Style.RESET_ALL}] Skipping autoload because there isn't a section named \"{self.plugin_name}\"")
+            pass
 
     @cmd2.with_argparser(parser_show)
     @plugin_activated
@@ -169,8 +174,8 @@ class FirstApp(cmd2.Cmd):
                 if self.autosave:
                     config.set(self.plugin_name, name, value)
                 
-                with open(self.configfilepath, 'w') as configfile:
-                    config.write(configfile)
+                    with open(self.configfilepath, 'w') as configfile:
+                        config.write(configfile)
 
                 break
         else:
