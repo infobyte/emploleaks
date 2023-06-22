@@ -122,9 +122,9 @@ class LinkedinModule:
         self.session.headers.update({'Csrf-Token': csrf_token})
         
     def get_company_info(self, name):
-        spinner = Halo(text='Gathering Information', spinner='dots')
+        #spinner = Halo(text='Gathering Information', spinner='dots')
 
-        spinner.start()
+        #spinner.start()
         escaped_name = urllib.parse.quote_plus(name)
 
         response = self.session.get(('https://www.linkedin.com'
@@ -136,20 +136,20 @@ class LinkedinModule:
             return
 
         if response.status_code != 200:
-            spinner.stop()
+            #spinner.stop()
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Unexpected HTTP repsonse code when trying to get the company info:")
             print(f"\t{response.status_code}")
             return
 
         if 'mwlite' in response.text:
-            spinner.stop()
+            #spinner.stop()
             print("\tA permanent fix is being researched. Sorry about that!")
             return
 
         try:
             response_json = json.loads(response.text)
         except json.decoder.JSONDecodeError:
-            spinner.stop()
+            #spinner.stop()
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Broke processing JSON, RAROOOO!")
             return
 
@@ -162,7 +162,7 @@ class LinkedinModule:
 
         found_id = company['trackingInfo']['objectUrn'].split(':')[-1]
         
-        spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Wow!')
+        #spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Wow!')
         return (found_id, found_staff)
 
     def do_loops(self, company_id, outer_loops, depth):

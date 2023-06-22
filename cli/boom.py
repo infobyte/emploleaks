@@ -6,6 +6,7 @@ import os
 import configparser
 
 from colorama import Style, Fore
+from halo import Halo
 from prettytable import PrettyTable
 from tabulate import tabulate
 from linkedin_api import Linkedin
@@ -43,6 +44,10 @@ autosave_options = cmd2.Cmd2ArgumentParser()
 autosave_options.add_argument('--enable', action="store_true", default=False)
 autosave_options.add_argument('--disable', action="store_true", default=False)
 
+parser_output = cmd2.Cmd2ArgumentParser()
+parser_output.add_argument('--grepeable', action="store_true")
+parser_output.add_argument('--no-grepeable', action='store_true')
+
 class FirstApp(cmd2.Cmd):
 
     def __init__(self, connector_db=None, *args, **kwargs):
@@ -55,6 +60,7 @@ class FirstApp(cmd2.Cmd):
         
         self.autoload = os.path.isfile(self.configfilepath) # if exists the file autoload = True
         self.autosave = self.autoload
+        self.output_grepeable = False
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -186,6 +192,15 @@ class FirstApp(cmd2.Cmd):
         self.plugin_name = ''
         self.plugin_instance = None
 
+    @cmd2.with_argparser(parser_output)
+    def do_output(self, args):
+        if args.grepeable:
+            self.output_grepeable = True
+            print(f"[{Fore.GREEN}+{Style.RESET_ALL}] grepeable format enabled")
+        elif args.no_grepeable:
+            self.output_grepeable = False
+            print(f"[{Fore.GREEN}+{Style.RESET_ALL}] grepeable format disabled")
+
     @plugin_activated
     def do_run(self, args):
         if self.plugin_name == 'linkedin':
@@ -194,24 +209,46 @@ class FirstApp(cmd2.Cmd):
             except IndexError:
                 cmd = 'help'
 
-            if cmd == 'seek':
+            if cmd == 'find':
                 company_name = args.arg_list[1]
                 
+                if not self.output_grepeable:
+                    spinner = Halo(text='Gathering Information', spinner='dots')
+                    spinner.start()
+
                 found_id, found_staff = self.plugin_instance.get_company_info(company_name)
                 depth = int((found_staff / 25) + 1)
                 outer_loops = range(0, 1)
 
                 profiles = self.plugin_instance.do_loops(found_id, outer_loops, depth)
-                
                 api = Linkedin(self.plugin_instance.get_username(), self.plugin_instance.get_password())
-                for profile in profiles:
-                    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Contacts of: " + profile['full_name'])
-                    connections = api.search_people(connection_of=profile['urn'].split(':')[-1], network_depths='F')
-                    print(connections)
+                
+                if not self.output_grepeable:
+                    spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Listing profiles:')
+
+                for i, profile in enumerate(profiles):
+                    if not self.output_grepeable:
+                        print("{:2d}: ".format(i))
+                        print("\tfull name: " + profile['full_name'])
+                        print("\tprofile name: " + profile['profile_name'])
+                        print("\toccupation: " + profile['occupation'])
+                        print("\tpublic identifier: " + profile['publicIdentifier'])
+                        print("\turn: " + profile['urn'])
+                    else:
+                        print(",".join([profile['full_name'],
+                                        profile['profile_name'],
+                                        profile['occupation'],
+                                        profile['publicIdentifier'],
+                                        profile['urn']]))
+
+                    #TODO: fix this
+                    #connections = api.search_people(connection_of=profile['urn'].split(':')[-1], network_depths='F')
+                    #print(connections)
 
             elif cmd == 'help':
-                print("[{Fore.BLUE}*{Style.RESET_ALL}] Not implemented yet. Sorry")
-                #This code is going to call to self.plugin_instance.help()
+                print("login: login in linkedin with your credentials")
+                print("find [company]: seek members of the company at linkedin")
+                print("help: show this message")
 
             elif cmd == 'login':
                 username = self.plugin_instance.get_username()
@@ -226,6 +263,7 @@ class FirstApp(cmd2.Cmd):
 
                 else:
                     print(f"[{Fore.RED}-{Style.RESET_ALL}] Fill the options. To see it, use 'show options'.")
+
         elif self.plugin_name == 'github':
             try:
                 cmd = args.arg_list[0]
