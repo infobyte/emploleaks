@@ -234,12 +234,56 @@ class FirstApp(cmd2.Cmd):
                         print("\toccupation: " + profile['occupation'])
                         print("\tpublic identifier: " + profile['publicIdentifier'])
                         print("\turn: " + profile['urn'])
+                        
+                        spinner.start()
+                        contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
+                        spinner.stop_and_persist(symbol='😵'.encode('utf-8'), text='Printing contact info')
+
+                        print("\tContact info:")
+                        
+                        if contact_info['email_address'] != None:
+                            print("\t\temail: " + contact_info['email_address'])
+                        
+                        if contact_info['websites'] != None and contact_info['websites'] != []:
+                            for i, website in enumerate(contact_info['websites']):
+                                print("\t\twebsite {:d}. {:s}".format(i, website['url']))
+                        
+                        if contact_info['twitter'] != None and contact_info['twitter'] != []:
+                            for i, twitter in enumerate(contact_info['twitter']):
+                                print("\t\ttwitter {:d}. {:s}".format(i, twitter['name']))
+                        
+                        if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
+                            for i, phone in enumerate(contact_info['phone_numbers']):
+                                print("\t\tphone {:d}. {:s}".format(i, phone))
+                        
                     else:
+                        contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
+                        
                         print(",".join([profile['full_name'],
                                         profile['profile_name'],
-                                        profile['occupation'],
+                                        profile['occupation'].replace(',', '.'),
                                         profile['publicIdentifier'],
-                                        profile['urn']]))
+                                        profile['urn']]), end="")
+                        
+                        email_address = '' if contact_info['email_address'] == None else  contact_info['email_address']
+                        websites = []
+                        twitters = []
+                        phones = []
+                        
+                        if contact_info['websites'] != None and contact_info['websites'] != []:
+                            for website in contact_info['websites']:
+                                websites.append(website['url'])
+
+                        if contact_info['twitter'] != None and contact_info['twitter'] != []:
+                            for twitter in contact_info['twitter']:
+                                twitters.append(twitter['name'])
+
+                        if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
+                            for phone in contact_info['phone_numbers']:
+                                phones.append(phone)
+
+                        print(",{},{},{},{}".format(email_address, '|'.join(websites), '|'.join(twitters), '|'.join(phones)))
+
 
                     #TODO: fix this
                     #connections = api.search_people(connection_of=profile['urn'].split(':')[-1], network_depths='F')
