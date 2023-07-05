@@ -4,6 +4,7 @@ import psycopg2
 import getpass
 import os
 import configparser
+import json
 
 from colorama import Style, Fore
 from halo import Halo
@@ -61,6 +62,7 @@ class FirstApp(cmd2.Cmd):
         self.autoload = os.path.isfile(self.configfilepath) # if exists the file autoload = True
         self.autosave = self.autoload
         self.output_grepeable = False
+        self.previous = []
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -95,6 +97,13 @@ class FirstApp(cmd2.Cmd):
         self.poutput(f"[{Fore.BLUE}*{Style.RESET_ALL}] version: {db_version[0]}")
 
         cur.close()
+
+    def do_previous(self, args):
+        plugin = args.arg_list[0]
+        name = args.arg_list[1]
+        for prev in self.previous:
+            if name == prev['name'] and plugin == prev['plugin']:
+                print(json.dumps(prev['data']))
 
     @cmd2.with_argparser(parser_find)
     @leakdb_connected
@@ -220,7 +229,15 @@ class FirstApp(cmd2.Cmd):
                 depth = int((found_staff / 25) + 1)
                 outer_loops = range(0, 1)
 
+                #TODO: agregar la opcion para iterar de 25 en 25. Haciendo multiples llamadas a do_loops
                 profiles = self.plugin_instance.do_loops(found_id, outer_loops, depth)
+
+                self.previous.append({
+                    'name': 'profiles',
+                    'plugin': 'linkedin',
+                    'data': profiles
+                    })
+
                 api = Linkedin(self.plugin_instance.get_username(), self.plugin_instance.get_password())
                 
                 if not self.output_grepeable:
@@ -237,7 +254,16 @@ class FirstApp(cmd2.Cmd):
                         
                         spinner.start()
                         contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
-                        spinner.stop_and_persist(symbol='😵'.encode('utf-8'), text='Printing contact info')
+
+                        for prev_profile in self.previous[-1]['data']:
+                            #import pdb;pdb.set_trace()
+                            if prev_profile['publicIdentifier'] == profile['publicIdentifier']:
+                                prev_profile['contact_info'] = contact_info
+                                break
+                        else:
+                            print(f"[{Fore.RED}-{Style.RESET_ALL}] Bug: public_id was not found in prev_profile")
+                        
+                        spinner.stop_and_persist(symbol='😵'.encode('utf-8'), text='Analyzing contact info for "{}"'.format(profile['full_name']))
 
                         print("\tContact info:")
                         
@@ -254,7 +280,7 @@ class FirstApp(cmd2.Cmd):
                         
                         if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
                             for i, phone in enumerate(contact_info['phone_numbers']):
-                                print("\t\tphone {:d}. {:s}".format(i, phone))
+                                print("\t\tphone {:d}. {}".format(i, phone))
                         
                     else:
                         contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
@@ -381,7 +407,7 @@ class FirstApp(cmd2.Cmd):
 
 if __name__ == '__main__':
     c = FirstApp()
-    c.prompt = f"{Fore.RED}boom{Style.RESET_ALL}> "
+    c.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
     ascii_logo = '''
 ___________              .__         .__                 __            
 \_   _____/ _____ ______ |  |   ____ |  |   ____ _____  |  | __  ______
@@ -391,5 +417,5 @@ ___________              .__         .__                 __
         \/      \/|__|                         \/     \/     \/     \/ 
 '''
     c.poutput(ascii_logo)
-    c.poutput("OSINT tool \U0001F575")
+    c.poutput("OSINT tool \U0001F575 created to chained multiples apis")
     c.cmdloop()
