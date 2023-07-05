@@ -136,7 +136,7 @@ class FirstApp(cmd2.Cmd):
 
     @cmd2.with_argparser(parser_use)
     def do_use(self, args):
-        self.prompt = f"{Fore.RED}boom{Style.RESET_ALL}({args.plugin})> "
+        self.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}({args.plugin})> "
         self.plugin_name = args.plugin
 
         if args.plugin == 'twitter':
@@ -197,7 +197,7 @@ class FirstApp(cmd2.Cmd):
             self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Option invalid...")
 
     def do_deactivate(self, args):
-        self.prompt = f"{Fore.RED}boom{Style.RESET_ALL}> "
+        self.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
         self.plugin_name = ''
         self.plugin_instance = None
 

@@ -30,7 +30,7 @@ previous_command_handler = app("previous linkedin profiles")
 linkedin_profiles = json.loads(previous_command_handler.stdout)
 for profile in linkedin_profiles:
     if profile['contact_info'] != None and profile['contact_info']['email_address'] != None:
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
         find_leaked = app("find {}".format(profile['contact_info']['email_address']))
         print(find_leaked.stdout)        
 
