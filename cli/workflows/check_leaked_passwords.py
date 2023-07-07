@@ -27,6 +27,8 @@ print("The following command could take a couple of minutes, be pacient")
 command_handler = app("run find {}".format(company))
 previous_command_handler = app("previous linkedin profiles")
 
+print(previous_command_handler.stdout)
+import pdb;pdb.set_trace()
 linkedin_profiles = json.loads(previous_command_handler.stdout)
 for profile in linkedin_profiles:
     if profile['contact_info'] != None and profile['contact_info']['email_address'] != None:

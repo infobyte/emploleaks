@@ -178,8 +178,8 @@ class FirstApp(cmd2.Cmd):
             value = getpass.getpass(prompt= name+": ")
 
         if self.autosave:
-            config = configparser.ConfigParser()
-            config.add_section(self.plugin_name)
+            config = configparser.RawConfigParser()
+            config.read(self.configfilepath)
 
         for opt in self.plugin_instance.options:
             if opt['name'] == name:
@@ -187,6 +187,9 @@ class FirstApp(cmd2.Cmd):
                 self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Updating value successfull")
 
                 if self.autosave:
+                    if not config.has_section(self.plugin_name):
+                        config.add_section(self.plugin_name)
+
                     config.set(self.plugin_name, name, value)
                 
                     with open(self.configfilepath, 'w') as configfile:
