@@ -27,12 +27,22 @@ print("The following command could take a couple of minutes, be pacient")
 command_handler = app("run find {}".format(company))
 previous_command_handler = app("previous linkedin profiles")
 
-print(previous_command_handler.stdout)
-import pdb;pdb.set_trace()
+#print(previous_command_handler.stdout)
+#import pdb;pdb.set_trace()
 linkedin_profiles = json.loads(previous_command_handler.stdout)
+
+#print(linkedin_profiles)
 for profile in linkedin_profiles:
-    if profile['contact_info'] != None and profile['contact_info']['email_address'] != None:
-        #import pdb;pdb.set_trace()
-        find_leaked = app("find {}".format(profile['contact_info']['email_address']))
-        print(find_leaked.stdout)        
+    try:
+        if profile['contact_info'] != None and profile['contact_info']['email_address'] != None and '@' in profile['contact_info']['email_address']:
+            print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Password for "', end='')
+            print('{}" exists'.format(profile['full_name']))
+
+            print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Email: ', end='')
+            print(profile['contact_info']['email_address'])
+
+            find_leaked = app("find --email {}".format(profile['contact_info']['email_address']))
+            print(find_leaked.stdout)
+    except KeyError:
+        pass
 

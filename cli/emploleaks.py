@@ -104,6 +104,7 @@ class FirstApp(cmd2.Cmd):
         for prev in self.previous:
             if name == prev['name'] and plugin == prev['plugin']:
                 print(json.dumps(prev['data']))
+                break
 
     @cmd2.with_argparser(parser_find)
     @leakdb_connected
@@ -266,7 +267,7 @@ class FirstApp(cmd2.Cmd):
                         else:
                             print(f"[{Fore.RED}-{Style.RESET_ALL}] Bug: public_id was not found in prev_profile")
                         
-                        spinner.stop_and_persist(symbol='😵'.encode('utf-8'), text='Analyzing contact info for "{}"'.format(profile['full_name']))
+                        spinner.stop_and_persist(symbol='🔑'.encode('utf-8'), text='Getting and processing contact info of "{}"'.format(profile['full_name']))
 
                         print("\tContact info:")
                         
