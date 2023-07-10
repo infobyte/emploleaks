@@ -421,5 +421,5 @@ ___________              .__         .__                 __
         \/      \/|__|                         \/     \/     \/     \/ 
 '''
     c.poutput(ascii_logo)
-    c.poutput("OSINT tool \U0001F575 created to chained multiples apis")
+    c.poutput("OSINT tool \U0001F575  to chain multiple apis")
     c.cmdloop()
