@@ -1,6 +1,8 @@
 import requests
 import json
 
+from colorama import Style, Fore
+
 class GithubModule:
     def __init__(self):
         self.options = [{
@@ -38,8 +40,16 @@ class GithubModule:
         if response.status_code == 200:
             data = json.loads(response.text)
             mails.append({'user': username, 'email': data["email"]})
+
+            repos_url = "https://api.github.com/users/{}/repos".format(username)
+            response2 = self.session.get(repos_url, headers=headers)
+            if response2.status_code == 200:
+                data2 = json.loads(response.text)
+                print(data2)
+            
         else:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Error getting the information")
             return []
 
+        #TODO: cambiar esto para que no retorne, que haga las peticiones y saque por pantalla nomas
         return mails

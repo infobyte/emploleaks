@@ -129,9 +129,12 @@ class FirstApp(cmd2.Cmd):
                 table.append([row[0], row[1]])
             '''
 
-        tab = PrettyTable(table[0])
-        tab.add_rows(table[1:])
-        self.poutput(tab)
+        if len(table) > 1:
+            tab = PrettyTable(table[0])
+            tab.add_rows(table[1:])
+            self.poutput(tab)
+        else:
+            print(f"[{Fore.RED}-{Style.RESET_ALL}] Password not found for {args.email}")
 
         cur.close()
 
