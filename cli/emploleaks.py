@@ -356,10 +356,31 @@ class FirstApp(cmd2.Cmd):
                 for mail in mails:
                     fields.append([ mail['user'], mail['email'] ])
 
-                tab.add_rows(fields[1:])
-                print(tab)
+                if len(fields) > 1:
+                    tab.add_rows(fields[1:])
+                    print(tab)
+                else:
+                    print(f"[{Fore.RED}-{Style.RESET_ALL}] mail not found")
+
             elif cmd == 'help':
                 self.plugin_instance.help()
+
+            elif cmd == "get_repos":
+                github_username = args.arg_list[1]
+                data = self.plugin_instance.get_repos(github_username)
+                
+                fields = [['name', 'description', 'url']]
+                tab = PrettyTable(fields[0])
+                
+                for repo in data:
+                    if repo['description'] != None:
+                        fields.append([ repo['name'], repo['description'][:25], repo['url'] ])
+                    else:
+                        fields.append([ repo['name'], '', repo['url'] ])
+
+                tab.add_rows(fields[1:])
+                print(tab)
+
             else:
                 print("Argument {} not recognized".format(cmd))
   
