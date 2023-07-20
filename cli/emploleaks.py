@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import cmd2
 import psycopg2
 import getpass
@@ -369,17 +369,15 @@ class FirstApp(cmd2.Cmd):
                 github_username = args.arg_list[1]
                 data = self.plugin_instance.get_repos(github_username)
                 
-                fields = [['name', 'description', 'url']]
-                tab = PrettyTable(fields[0])
+                fields = [['name', 'url', 'description']]
+                #tab = PrettyTable(fields[0])
                 
                 for repo in data:
-                    if repo['description'] != None:
-                        fields.append([ repo['name'], repo['description'][:25], repo['url'] ])
-                    else:
-                        fields.append([ repo['name'], '', repo['url'] ])
+                    fields.append([ repo['name'], repo['url'], repo['description']])
 
-                tab.add_rows(fields[1:])
-                print(tab)
+                #tab.add_rows(fields[1:])
+                #print(tab)
+                self.poutput(tabulate(fields, headers='firstrow'))
 
             else:
                 print("Argument {} not recognized".format(cmd))

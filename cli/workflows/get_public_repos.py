@@ -32,12 +32,28 @@ previous_command_handler = app("previous linkedin profiles")
 linkedin_profiles = json.loads(previous_command_handler.stdout)
 
 #print(linkedin_profiles)
+is_first = True
 for profile in linkedin_profiles:
     try:
         if profile['contact_info'] != None and profile['contact_info']['websites'] != None:
             for website in profile['contact_info']['websites']:
                 if 'github' in website:
-                    print("pingueando a {}".format(website))
+                    if is_first:
+                        app('deactivate')
+                        app('use --plugin github')
+
+                        is_first = False
+
+                    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] github repo located for {profile['full_name']}")
+
+                    username = website.replace('https://github.com', '')
+                    username = username.replace('/','')
+
+                    print(f"[{Fore.BLUE}*{Style.RESET_ALL}] accessing repos from {username}")
+                    repos_cmd = app('run get_repos {}'.format(username))
+                    print(repos_cmd.stdout)
+            
+                    
             '''
             print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Password for "', end='')
             print('{}" exists'.format(profile['full_name']))
