@@ -1,6 +1,8 @@
 import requests
 import json
 
+from colorama import Style, Fore
+
 class GithubModule:
     def __init__(self):
         self.options = [{
@@ -43,3 +45,19 @@ class GithubModule:
             return []
 
         return mails
+
+    def get_repos(self, username):
+        repos_url = "https://api.github.com/users/{}/repos".format(username)
+
+        headers = {'Authorization': 'Bearer ' + self.options[0]['value']}
+        response = self.session.get(repos_url, headers=headers)
+        if response.status_code == 200:
+            data = json.loads(response.text)
+            return data
+        else:
+            print(f"[{Fore.RED}-{Style.RESET_ALL} Error getting the repos")
+    
+    def help(self):
+        print("plugin commands:")
+        print("stalk github_username\tget email address from account.")
+        print("get_repos github_username\tretrieve all public repos of the user.")
