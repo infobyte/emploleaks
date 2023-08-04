@@ -1,4 +1,4 @@
-# 🔎 Tool for Employee Information Gathering
+# 🔎 EmploLeaks
 
 This is a tool designed for Open Source Intelligence (OSINT) purposes, which helps to gather information about employees of a company.
 
@@ -10,12 +10,12 @@ The tool starts by searching through LinkedIn to obtain a list of employees of t
 
 To use this tool, you'll need to have Python 3.10 installed on your machine. Clone this repository to your local machine and install the required dependencies using pip in the *cli* folder:
 
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 ### OSX
 We know that there is a problem when installing the tool due to the *psycopg2* binary. If you run into this problem, you can solve it running:
 
-python3 -m pip install psycopg2-binary
+`python3 -m pip install psycopg2-binary`
 
 
 ## 📈 Basic Usage
@@ -48,7 +48,7 @@ Right now, the tool supports two functionalities:
 
 First, you must set the plugin to use, which in this case is *linkedin*. After, you should set your credentials and the run the *login* proccess:
 
-
+```
 emploleaks> use --plugin linkedin
 emploleaks(linkedin)> setopt USER myemail@domain.com
 [+] Updating value successfull
@@ -60,13 +60,15 @@ Module options:
 Name    Current Setting     Required    Description
 ------  ------------------  ----------  ---------------------------
 USER    myemail@domain.com  yes         linkedin account's username
-PASS    ********          yes           linkedin accout's password
+PASS    ********            yes         linkedin accout's password
 hide    yes                 no          hide the password field
 emploleaks(linkedin)> run login
 [+] Session established.
+```
 
 Now that the module is configured, you can run it and start gathering information from the company:
 
+```
 emploleaks(linkedin)> run find EvilCorp
 [+] Added 25 new names.
 [+] Added 22 new names.
@@ -79,18 +81,21 @@ emploleaks(linkedin)> run find EvilCorp
 	occupation: Sr XYZ
 	public identifier: xyz-zyx
 	urn: urn:li:member:67241221
-
+```
 
 ### Get Linkedin accounts + Leaked Passwords
 
 We created a custom *workflow*, where with the information retrieved by Linkedin, we try to match employees' personal emails to potential leaked passwords. In this case, you can connect to a database (in our case we have a custom indexed COMB database) using the *connect* command, as it is shown below:
 
+```
 emploleaks(linkedin)> connect --user myuser --passwd mypass123 --dbname mydbname --host 1.2.3.4
 [+] Connecting to the Leak Database...
 [*] version: PostgreSQL 12.15
+```
 
 Once it's connected, you can run the *workflow*. With all the users gathered, the tool will try to search in the database if a leaked credential is affecting someone:
 
+```
 emploleaks(linkedin)> run_pyscript workflows/check_leaked_passwords.py EvilCorp
 [-] Failing login... trying again!
 [-] Failing login... trying again!
@@ -108,6 +113,7 @@ The following command could take a couple of minutes, be patient
 +------------------+
 | laFQqAOSL6t      |
 +------------------+
+```
 
 As a conclusion, the tool will generate a console output with the following information:
 
@@ -124,12 +130,12 @@ We are integrating other public sites and applications that may offer about a le
  - Integration with Leak Check
  - Integration with BreachAlarm
 
- Also, our idea is collect even more information from public sources from every employee. Do you have any idea in mind? Don't hesitate to reach us:
+ Also, we will be focusing on gathering even more information from public sources of every employee. Do you have any idea in mind? Don't hesitate to reach us:
 
- Javi Aguinaga: jaguinaga@faradaysec.com
- Gabi Franco: gabrielf@faradaysec.com
+  - Javi Aguinaga: jaguinaga@faradaysec.com
+  - Gabi Franco: gabrielf@faradaysec.com
 
- Or you con DM at @pastacls or @gaaabifranco on Twitter.
+ Or you con DM at [@pastacls](https://twitter.com/pastacls) or [@gaaabifranco](https://twitter.com/gaaabifranco) on Twitter.
 
 ## 📝 License
 
