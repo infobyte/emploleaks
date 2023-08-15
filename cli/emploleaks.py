@@ -430,6 +430,57 @@ class FirstApp(cmd2.Cmd):
 
         print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autoload " + ('enabled' if self.autoload else 'disabled'))
 
+    @cmd2.with_argparser(parser_connect)
+    def do_create_db(self, args):
+        print(f'[{Fore.BLUE}*{Style.RESET_ALL}] The full database occups more than 200 GB, take this in account')
+        print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Creating the database')
+        #create_db_and_user.sh
+        os.system('sudo -u postgres psql -c "CREATE DATABASE {0};"'.format(args.host))
+        os.system('sudo -u postgres psql -c "CREATE USER {0} with encrypted password \'{1}\';"'.format(args.user, args.passwd))
+        os.system('sudo -u postgres psql -c "ALTER ROLE {0} WITH SUPERUSER;"'.format(args.user))
+        os.system('sudo -u postgres psql -c "ALTER DATABASE {0} OWNER TO {1};"'.format(args.dbname, args.user))
+        os.system('sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {0} TO {1};'.format(args.dbname, args.user))
+
+        # https://www.dbi-services.com/blog/the-fastest-way-to-load-1m-rows-in-postgresql/
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET fsync=\'off\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET synchronous_commit=\'off\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET full_page_writes=\'off\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET bgwriter_lru_maxpages=0;"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET wal_level=\'minimal\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET archive_mode=\'off\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET work_mem=\'64MB\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET max_wal_senders=0;"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET maintenance_work_mem=\'64MB\';"')
+        os.system('sudo -u postgres psql -c "ALTER SYSTEM SET shared_buffers=\'128MB\';"')
+
+        if self.conn == None:
+            try:
+                self.conn = psycopg2.connect(host=args.host, database=args.dbname, user=args.user, password=args.passwd)
+            except psycopg2.OperationalError:
+                self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Database connection failed")
+                return
+
+            self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Connecting to the Leak Database...")
+        cur = self.conn.cursor()
+        
+        cur.execute("CREATE TABLE IF NOT EXISTS data (email varchar(256) NOT NULL, password varchar(256) NOT NULL);")
+        
+        for root, dirs, files in os.walk(os.path.join(os.getcwd(), "csv_data"), topdown=False):
+            for name in files:
+                fname = (os.path.join(root, name))
+                print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Importing from {fname}')
+                try:
+                    cur.execute("COPY data FROM %s DELIMITER ':' CSV ESCAPE '\\';", (fname,))
+                except e:
+                    print(e)
+                    print(f'[{Fore.RED}-{Style.RESET_ALL}] May be a malformated entry in the file')
+                # Make the changes to the database persistent
+                self.conn.commit()
+
+        print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Creating index...')
+        cur.execute("CREATE INDEX email_idx_btree ON data USING btree (email);")
+
+        cur.close()
 
 if __name__ == '__main__':
     c = FirstApp()

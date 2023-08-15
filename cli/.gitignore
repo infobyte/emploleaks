@@ -1,2 +1,4 @@
 config/*
+csv_data/*
 *.pyc
+*.swp
