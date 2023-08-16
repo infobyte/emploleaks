@@ -5,6 +5,7 @@ import getpass
 import os
 import configparser
 import json
+import io
 
 from colorama import Style, Fore
 from halo import Halo
@@ -15,6 +16,11 @@ from linkedin_api import Linkedin
 from plugins.twitter import TwitterModule
 from plugins.github import GithubModule
 from plugins.linkedin import LinkedinModule
+
+def dir_path(string):
+    if os.path.isdir(string):
+        return string
+    print(f'[{Fore.RED}-{Style.RESET_ALL}] {string} is not a valid directory')
 
 parser_connect = cmd2.Cmd2ArgumentParser()
 parser_connect.add_argument('--user',
@@ -29,6 +35,14 @@ parser_connect.add_argument('--dbname',
 parser_connect.add_argument('--host',
                                    default="localhost",
                                    help="the database's host")
+
+create_db_parser = cmd2.Cmd2ArgumentParser()
+create_db_parser.add_argument('--user', required=True, help='the database user')
+create_db_parser.add_argument('--passwd', required=True, help='the password to access the database')
+create_db_parser.add_argument('--dbname', required=True, help='the name of the database')
+create_db_parser.add_argument('--host', default='localhost', help='the database server')
+
+create_db_parser.add_argument('--comb', type=dir_path, required=True, help='directory with the comb structure')
 
 parser_find = cmd2.Cmd2ArgumentParser()
 parser_find.add_argument('--email')
@@ -430,16 +444,16 @@ class FirstApp(cmd2.Cmd):
 
         print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autoload " + ('enabled' if self.autoload else 'disabled'))
 
-    @cmd2.with_argparser(parser_connect)
+    @cmd2.with_argparser(create_db_parser)
     def do_create_db(self, args):
         print(f'[{Fore.BLUE}*{Style.RESET_ALL}] The full database occups more than 200 GB, take this in account')
         print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Creating the database')
         #create_db_and_user.sh
-        os.system('sudo -u postgres psql -c "CREATE DATABASE {0};"'.format(args.host))
+        os.system('sudo -u postgres psql -c "CREATE DATABASE {0};"'.format(args.dbname))
         os.system('sudo -u postgres psql -c "CREATE USER {0} with encrypted password \'{1}\';"'.format(args.user, args.passwd))
         os.system('sudo -u postgres psql -c "ALTER ROLE {0} WITH SUPERUSER;"'.format(args.user))
         os.system('sudo -u postgres psql -c "ALTER DATABASE {0} OWNER TO {1};"'.format(args.dbname, args.user))
-        os.system('sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {0} TO {1};'.format(args.dbname, args.user))
+        os.system('sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {0} TO {1};"'.format(args.dbname, args.user))
 
         # https://www.dbi-services.com/blog/the-fastest-way-to-load-1m-rows-in-postgresql/
         os.system('sudo -u postgres psql -c "ALTER SYSTEM SET fsync=\'off\';"')
@@ -465,14 +479,27 @@ class FirstApp(cmd2.Cmd):
         
         cur.execute("CREATE TABLE IF NOT EXISTS data (email varchar(256) NOT NULL, password varchar(256) NOT NULL);")
         
-        for root, dirs, files in os.walk(os.path.join(os.getcwd(), "csv_data"), topdown=False):
+        for root, dirs, files in os.walk(os.path.join(args.comb, "data"), topdown=False):
             for name in files:
                 fname = (os.path.join(root, name))
                 print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Importing from {fname}')
+                
+                with open(fname + '.csv', 'w') as sanitized:
+                    with open(fname) as inputfile:
+                        for line in inputfile:
+                            line = line.strip()
+                            if line and line.isprintable():
+                                # Escape \ and "
+                                line = line.replace('\\', '\\\\').replace('"', '\\"')
+                                # Add quotes and replace : with ,
+                                line = line.replace(':', '\",\"', 1)
+                                line = '\"' + line + '\"'
+                                
+                                sanitized.write(line + '\n')
+                os.remove(fname)
                 try:
-                    cur.execute("COPY data FROM %s DELIMITER ':' CSV ESCAPE '\\';", (fname,))
-                except e:
-                    print(e)
+                    cur.execute("COPY data FROM %s CSV ESCAPE '\\';", (fname + '.csv',))
+                except:
                     print(f'[{Fore.RED}-{Style.RESET_ALL}] May be a malformated entry in the file')
                 # Make the changes to the database persistent
                 self.conn.commit()
