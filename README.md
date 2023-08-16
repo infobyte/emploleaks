@@ -121,6 +121,101 @@ As a conclusion, the tool will generate a console output with the following info
 - The social network profiles associated with each employee (obtained from email address)
 - A list of leaked passwords associated with each email address.
 
+## 📰 How to build the indexed COMB database
+
+An imortant aspect of this project is the use of the indexed COMB database, to build your version you need to [download the torrent first](comb.torrent). Be careful, because the files and the indexed version downloaded requires, at least, 400 GB of disk space available.
+
+Once the torrent has been completelly downloaded you will get a file folder as following:
+
+```
+├── count_total.sh
+├── data
+│   ├── 0
+│   ├── 1
+│   │   ├── 0
+│   │   ├── 1
+│   │   ├── 2
+│   │   ├── 3
+│   │   ├── 4
+│   │   ├── 5
+│   │   ├── 6
+│   │   ├── 7
+│   │   ├── 8
+│   │   ├── 9
+│   │   ├── a
+│   │   ├── b
+│   │   ├── c
+│   │   ├── d
+│   │   ├── e
+│   │   ├── f
+│   │   ├── g
+│   │   ├── h
+│   │   ├── i
+│   │   ├── j
+│   │   ├── k
+│   │   ├── l
+│   │   ├── m
+│   │   ├── n
+│   │   ├── o
+│   │   ├── p
+│   │   ├── q
+│   │   ├── r
+│   │   ├── s
+│   │   ├── symbols
+│   │   ├── t
+```
+
+At this point, you could import all those files with the command `create_db`:
+
+```
+emploleaks> create_db --dbname leakdb --user leakdb_user --passwd leakdb_pass --comb /home/pasta/Downloads/comb
+[*] The full database occups more than 200 GB, take this in account
+[*] Creating the database
+ERROR:  database "leakdb" already exists
+ERROR:  role "leakdb_user" already exists 
+ALTER ROLE
+ALTER DATABASE
+GRANT
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+ALTER SYSTEM
+[+] Connecting to the Leak Database...
+[+] Importing from /home/pasta/Downloads/comb/data/1/m
+[+] Importing from /home/pasta/Downloads/comb/data/1/d
+[+] Importing from /home/pasta/Downloads/comb/data/1/v
+[+] Importing from /home/pasta/Downloads/comb/data/1/0
+[+] Importing from /home/pasta/Downloads/comb/data/1/8
+[+] Importing from /home/pasta/Downloads/comb/data/1/u
+[+] Importing from /home/pasta/Downloads/comb/data/1/k
+[+] Importing from /home/pasta/Downloads/comb/data/1/r
+[+] Importing from /home/pasta/Downloads/comb/data/1/7
+[+] Importing from /home/pasta/Downloads/comb/data/1/h
+[+] Importing from /home/pasta/Downloads/comb/data/1/o
+[+] Importing from /home/pasta/Downloads/comb/data/1/t
+[+] Importing from /home/pasta/Downloads/comb/data/1/f
+[+] Importing from /home/pasta/Downloads/comb/data/1/n
+[+] Importing from /home/pasta/Downloads/comb/data/1/symbols
+[+] Importing from /home/pasta/Downloads/comb/data/1/g
+[+] Importing from /home/pasta/Downloads/comb/data/1/q
+[+] Importing from /home/pasta/Downloads/comb/data/1/a
+[+] Importing from /home/pasta/Downloads/comb/data/1/e
+[+] Importing from /home/pasta/Downloads/comb/data/1/l                            
+[+] Importing from /home/pasta/Downloads/comb/data/1/y                            
+[+] Importing from /home/pasta/Downloads/comb/data/1/s                            
+[+] Importing from /home/pasta/Downloads/comb/data/1/3                            
+[+] Importing from /home/pasta/Downloads/comb/data/1/6                            
+[*] Creating index... 
+```
+
+The importer takes a lot of time for that reason we recommend to run it with patience.
+
 ## 📌 Next Steps
 
 We are integrating other public sites and applications that may offer about a leaked credential. We may not be able to see the plaintext password, but it will give an insight if the user has any compromised credential:
