@@ -35,12 +35,16 @@ parser_connect.add_argument('--dbname',
 parser_connect.add_argument('--host',
                                    default="localhost",
                                    help="the database's host")
+parser_connect.add_argument('--port',
+                                   default="5432",
+                                   help="the database's port")
 
 create_db_parser = cmd2.Cmd2ArgumentParser()
 create_db_parser.add_argument('--user', required=True, help='the database user')
 create_db_parser.add_argument('--passwd', required=True, help='the password to access the database')
 create_db_parser.add_argument('--dbname', required=True, help='the name of the database')
 create_db_parser.add_argument('--host', default='localhost', help='the database server')
+create_db_parser.add_argument('--port', default='5432', help='the database port')
 
 create_db_parser.add_argument('--comb', type=dir_path, required=True, help='directory with the comb structure')
 
@@ -98,7 +102,7 @@ class FirstApp(cmd2.Cmd):
     def do_connect(self, args):
         if self.conn == None:
             try:
-                self.conn = psycopg2.connect(host=args.host, database=args.dbname, user=args.user, password=args.passwd)
+                self.conn = psycopg2.connect(host=args.host, port=args.port,  database=args.dbname, user=args.user, password=args.passwd)
             except psycopg2.OperationalError:
                 self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Database connection failed")
                 return
