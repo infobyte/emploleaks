@@ -263,11 +263,16 @@ class FirstApp(cmd2.Cmd):
                     'data': profiles
                     })
 
-                api = Linkedin(self.plugin_instance.get_username(), self.plugin_instance.get_password())
-                
+                api = Linkedin(
+                        self.plugin_instance.get_username(),
+                        self.plugin_instance.get_password(),
+                        authenticate = True,
+                        cookies = self.plugin_instance.session.cookies,
+                        )
+
                 if not self.output_grepeable:
                     spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Listing profiles:')
-
+                
                 for i, profile in enumerate(profiles):
                     if not self.output_grepeable:
                         print("{:2d}: ".format(i))
@@ -276,12 +281,11 @@ class FirstApp(cmd2.Cmd):
                         print("\toccupation: " + profile['occupation'])
                         print("\tpublic identifier: " + profile['publicIdentifier'])
                         print("\turn: " + profile['urn'])
-                        
-                        spinner.start()
+
+                        spinner.start()                        
                         contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
 
                         for prev_profile in self.previous[-1]['data']:
-                            #import pdb;pdb.set_trace()
                             if prev_profile['publicIdentifier'] == profile['publicIdentifier']:
                                 prev_profile['contact_info'] = contact_info
                                 break
@@ -344,6 +348,10 @@ class FirstApp(cmd2.Cmd):
                 print("login: login in linkedin with your credentials")
                 print("find [company]: seek members of the company at linkedin")
                 print("help: show this message")
+
+            elif cmd == 'impersonate':
+                print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Using cookies from the browser")
+                self.plugin_instance.impersonate()
 
             elif cmd == 'login':
                 username = self.plugin_instance.get_username()

@@ -12,7 +12,7 @@ except IndexError:
     sys.exit(1)
 
 app('use --plugin linkedin')
-app_handler = app('run login')
+app_handler = app('run impersonate')
 
 while "LinkedIn has a message for you" in app_handler.stdout:
     print(f"[{Fore.RED}-{Style.RESET_ALL}] Failing login... trying again!")
@@ -36,7 +36,7 @@ for profile in linkedin_profiles:
     try:
         if profile['contact_info'] != None and profile['contact_info']['email_address'] != None and '@' in profile['contact_info']['email_address']:
             print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Password for "', end='')
-            print('{}" exists'.format(profile['full_name']))
+            print('{}" appears at LinkedIn'.format(profile['full_name']))
 
             print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Email: ', end='')
             print(profile['contact_info']['email_address'])

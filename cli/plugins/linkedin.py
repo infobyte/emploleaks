@@ -11,18 +11,28 @@ class LinkedinModule:
         self.options = [{
                 'name': 'USER',
                 'value': '',
-                'required': True,
+                'required': False,
                 'description': "linkedin account's username"
              }, {
                 'name': 'PASS',
                 'value': '',
-                'required': True,
+                'required': False,
                 'description': "linkedin accout's password"
             }, {
                 'name': 'hide',
                 'value': 'yes',
                 'required': False,
                 'description': "hide the password field"
+            }, {
+                'name': 'JSESSIONID',
+                'value': '',
+                'required': False,
+                'description': "active cookie session in browser #1"
+            }, {
+                'name': 'li-at',
+                'value': '',
+                'required': False,
+                'description': "active cookie session in browser #1"
             }]
             
         self.session = None
@@ -47,11 +57,10 @@ class LinkedinModule:
         return table
 
     def login(self):
-        username = self.get_username()
-        password = self.get_password()
+        print(f'[{Fore.RED}-{Style.RESET_ALL}] Deprecated... Now you would use the impersonate command')
 
+    def impersonate(self):
         self.session = requests.session()
-        login_problems = ['challenge', 'captcha', 'manage-account', 'add-email']
 
         mobile_agent = ('Mozilla/5.0 (Linux; U; Android 4.4.2; en-us; SCH-I535 '
                         'Build/KOT49H) AppleWebKit/534.30 (KHTML, like Gecko) '
@@ -59,72 +68,17 @@ class LinkedinModule:
 
         self.session.headers.update({'User-Agent': mobile_agent,
                                 'X-RestLi-Protocol-Version': '2.0.0'})
-        
-        anon_response = self.session.get('https://www.linkedin.com/login')
-        login_csrf = re.findall(r'name="loginCsrfParam" value="(.*?)"', anon_response.text)
 
-        if login_csrf:
-            login_csrf = login_csrf[0]
-        else:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Having trouble loading login page... try the command again.")
-            return
+        self.session.cookies.set("JSESSIONID", self.options[3]['value'])
+        self.session.cookies.set("li_at", self.options[4]['value'])
 
-        auth_payload = {
-            'session_key': username,
-            'session_password': password,
-            'isJsEnabled': 'false',
-            'loginCsrfParam': login_csrf
-            }
-
-        response = self.session.post('https://www.linkedin.com/checkpoint/lg/login-submit'
-                                '?loginSubmitSource=GUEST_HOME',
-                                data=auth_payload, allow_redirects=False)
-
-        if response.status_code in (302, 303):
-            self.set_csrf_token()
-            redirect = response.headers['Location']
-            
-            if 'feed' in redirect:
-                return True
-
-            if 'add-phone' in redirect:
-                url = 'https://www.linkedin.com/checkpoint/post-login/security/dismiss-phone-event'
-                response = self.session.post(url)
-                if response.status_code == 200:
-                    return self.session
-                print(f"[{Fore.RED}-{Style.RESET_ALL}] Could not skip phone prompt. Log in via the web and then try again.")
-
-            elif any(x in redirect for x in login_problems):
-                print(f"[{Fore.RED}-{Style.RESET_ALL}] LinkedIn has a message for you that you need to address.")
-                print(f"[{Fore.BLUE}*{Style.RESET_ALL}] Please log in using a web browser first, and then come back and try again.")
-
-            else:
-                print(f"[{Fore.RED}-{Style.RESET_ALL}] Some unknown redirection ocurred. If this persist, please open an issue and include the info below:")
-                print("DEBUG INFO:")
-                print(f"LOCATION: {redirect}")
-                print(f"RESPONSE TEXT:\n{response.text}")
-
-            return False
-
-        if '<title>LinkedIn Login' in response.text:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Check your username and password and try again.")
-            return False
-        
-        print(f"[{Fore.RED}-{Style.RESET_ALL}] Some unknown error logging in. If this persist, please open and issue on github.")
-        print("DEBUG INFO:")
-        print(f"RESPONSE CODE: {response.status_code}")
-        print(f"RESPONSE TEXT:\n{response.text}")
-        
-        return False
+        self.set_csrf_token()
 
     def set_csrf_token(self):
         csrf_token = self.session.cookies['JSESSIONID'].replace('"', '')
         self.session.headers.update({'Csrf-Token': csrf_token})
         
     def get_company_info(self, name):
-        #spinner = Halo(text='Gathering Information', spinner='dots')
-
-        #spinner.start()
         escaped_name = urllib.parse.quote_plus(name)
 
         response = self.session.get(('https://www.linkedin.com'
@@ -136,20 +90,17 @@ class LinkedinModule:
             return
 
         if response.status_code != 200:
-            #spinner.stop()
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Unexpected HTTP repsonse code when trying to get the company info:")
             print(f"\t{response.status_code}")
             return
 
         if 'mwlite' in response.text:
-            #spinner.stop()
             print("\tA permanent fix is being researched. Sorry about that!")
             return
 
         try:
             response_json = json.loads(response.text)
         except json.decoder.JSONDecodeError:
-            #spinner.stop()
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Broke processing JSON, RAROOOO!")
             return
 
@@ -162,7 +113,6 @@ class LinkedinModule:
 
         found_id = company['trackingInfo']['objectUrn'].split(':')[-1]
         
-        #spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Wow!')
         return (found_id, found_staff)
 
     def do_loops(self, company_id, outer_loops, depth):
@@ -176,8 +126,6 @@ class LinkedinModule:
                 for page in range(0, depth):
                     new_names = 0
 
-                    spinner = Halo(text="Scraping results on loop...",  spinner='dots')
-
                     result = self.get_results(company_id, page, current_region, current_keyword)
                     if result.status_code != 200:
                         print(f"\n[{Fore.RED}-{Style.RESET_ALL}] Yikes, got an HTTP {result.status_code}. This is not normal")
@@ -186,7 +134,6 @@ class LinkedinModule:
                     if "UPSELL_LIMIT" in result.text:
                         print("[{Fore.RED}-{Style.RESET_ALL}] You've hit the commercial search limit! "
                               "Try again on the 1st of the month. Sorry. :(")
-                        spinner.stop()
                         return profiles_list
 
                     found_profiles = self.find_employees(result.text)
@@ -197,7 +144,6 @@ class LinkedinModule:
                     new_names += len(found_profiles)
                     profiles_list.extend(found_profiles)
 
-                    spinner.stop()
                     print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Added {new_names} new names.")
 
 
@@ -222,7 +168,10 @@ class LinkedinModule:
                '&origin=organization'
                f'&start={page * 25}')
 
-        result = self.session.get(url)
+        headers = {
+            'X-Li-Track': '{"clientVersion":"1.13.1793"}'
+        }
+        result = self.session.get(url, headers=headers)
         return result
     
     def find_employees(self,result):
@@ -254,5 +203,3 @@ class LinkedinModule:
                 found_profiles.append(employee)
 
         return found_profiles
-
-
