@@ -250,7 +250,14 @@ class FirstApp(cmd2.Cmd):
                     spinner = Halo(text='Gathering Information', spinner='dots')
                     spinner.start()
 
-                found_id, found_staff = self.plugin_instance.get_company_info(company_name)
+                try:
+                    found_id, found_staff = self.plugin_instance.get_company_info(company_name)
+                except:
+                    if not self.output_grepeable:
+                        spinner.stop()
+                    print(f"[{Fore.RED}-{Style.RESET_ALL}] The company name '{company_name}' does not exist at LinkedIn")
+                    return
+
                 depth = int((found_staff / 25) + 1)
                 outer_loops = range(0, 1)
 
