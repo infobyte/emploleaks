@@ -10,15 +10,18 @@ The tool starts by searching through LinkedIn to obtain a list of employees of t
 
 To use this tool, you'll need to have Python 3.10 installed on your machine. Clone this repository to your local machine and install the required dependencies using pip in the *cli* folder:
 
-`cd cli`
-`pip install -r requirements.txt`
+```
+cd cli
+pip install -r requirements.txt
+```
 
 ### OSX
 We know that there is a problem when installing the tool due to the *psycopg2* binary. If you run into this problem, you can solve it running:
 
-`cd cli`
-`python3 -m pip install psycopg2-binary`
-
+```
+cd cli
+python3 -m pip install psycopg2-binary`
+```
 
 ## 📈 Basic Usage
 
