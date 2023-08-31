@@ -7,22 +7,12 @@ from halo import Halo
 from colorama import Fore, Style
 
 class LinkedinModule:
-    def __init__(self):
+    def __init__(self, queue=None):
         self.options = [{
-                'name': 'USER',
-                'value': '',
-                'required': False,
-                'description': "linkedin account's username"
-             }, {
-                'name': 'PASS',
-                'value': '',
-                'required': False,
-                'description': "linkedin accout's password"
-            }, {
                 'name': 'hide',
                 'value': 'yes',
                 'required': False,
-                'description': "hide the password field"
+                'description': "hide the JSESSIONID field"
             }, {
                 'name': 'JSESSIONID',
                 'value': '',
@@ -36,28 +26,20 @@ class LinkedinModule:
             }]
             
         self.session = None
-
-    def get_username(self):
-        return self.options[0]['value']
-
-    def get_password(self):
-        return self.options[1]['value']
+        self.queue = queue
 
     def do_show(self, args):
         print("Module options:\n")
         table = [['Name', 'Current Setting', 'Required', 'Description']]        
-        hide_pass = self.options[2]['value'] == 'yes'
+        hide_pass = self.options[0]['value'] == 'yes'
 
         for opt in self.options:
-            if hide_pass and opt['name'] == 'PASS':
+            if hide_pass and opt['name'] == 'JSESSIONID':
                 table.append([ opt['name'], '*' * len(self.options[1]['value']), 'yes' if opt['required'] else 'no', opt['description']])
                 continue
             table.append([ opt['name'], opt['value'], 'yes' if opt['required'] else 'no', opt['description']])
         
         return table
-
-    def login(self):
-        print(f'[{Fore.RED}-{Style.RESET_ALL}] Deprecated... Now you would use the impersonate command')
 
     def impersonate(self):
         self.session = requests.session()
@@ -69,16 +51,26 @@ class LinkedinModule:
         self.session.headers.update({'User-Agent': mobile_agent,
                                 'X-RestLi-Protocol-Version': '2.0.0'})
 
-        self.session.cookies.set("JSESSIONID", self.options[3]['value'])
-        self.session.cookies.set("li_at", self.options[4]['value'])
+        print("Setting for first time JSESSIONID")
+        self.session.cookies.set("JSESSIONID", self.options[1]['value'], domain='.www.linkedin.com', secure=True)
+
+        print("Setting for first time li_at")
+        self.session.cookies.set("li_at", self.options[2]['value'], domain='.www.linkedin.com', secure=True)
 
         self.set_csrf_token()
 
     def set_csrf_token(self):
-        csrf_token = self.session.cookies['JSESSIONID'].replace('"', '')
-        self.session.headers.update({'Csrf-Token': csrf_token})
+        try:
+            csrf_token = self.session.cookies['JSESSIONID'].replace('"', '')
+            self.session.headers.update({'Csrf-Token': csrf_token})
+        except KeyError:
+            print("JSESSION is not setted")
         
     def get_company_info(self, name):
+        if self.session.cookies.get('JSESSIONID', '') == '':
+            print("Run impersonate first")
+            return
+
         escaped_name = urllib.parse.quote_plus(name)
 
         response = self.session.get(('https://www.linkedin.com'
@@ -90,8 +82,8 @@ class LinkedinModule:
             return
 
         if response.status_code != 200:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Unexpected HTTP repsonse code when trying to get the company info:")
-            print(f"\t{response.status_code}")
+            print(f"[{Fore.RED}-{Style.RESET_ALL}] Unexpected HTTP repsonse code {response.status_code} when trying to get the company info:")
+            import pdb;pdb.set_trace()
             return
 
         if 'mwlite' in response.text:

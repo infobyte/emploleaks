@@ -6,6 +6,7 @@ import os
 import configparser
 import json
 import io
+import queue
 
 from colorama import Style, Fore
 from halo import Halo
@@ -80,7 +81,6 @@ class FirstApp(cmd2.Cmd):
         self.autoload = os.path.isfile(self.configfilepath) # if exists the file autoload = True
         self.autosave = self.autoload
         self.output_grepeable = False
-        self.previous = []
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -115,14 +115,6 @@ class FirstApp(cmd2.Cmd):
         self.poutput(f"[{Fore.BLUE}*{Style.RESET_ALL}] version: {db_version[0]}")
 
         cur.close()
-
-    def do_previous(self, args):
-        plugin = args.arg_list[0]
-        name = args.arg_list[1]
-        for prev in self.previous:
-            if name == prev['name'] and plugin == prev['plugin']:
-                print(json.dumps(prev['data']))
-                break
 
     @cmd2.with_argparser(parser_find)
     @leakdb_connected
@@ -162,11 +154,11 @@ class FirstApp(cmd2.Cmd):
         self.plugin_name = args.plugin
 
         if args.plugin == 'twitter':
-            self.plugin_instance = TwitterModule()
+            self.plugin_instance = TwitterModule(queue=self.queue)
         elif args.plugin == 'linkedin':
-            self.plugin_instance = LinkedinModule()
+            self.plugin_instance = LinkedinModule(queue=self.queue)
         elif args.plugin == 'github':
-            self.plugin_instance = GithubModule()
+            self.plugin_instance = GithubModule(queue=self.queue)
 
         if self.autoload:
             self.load_options_from_configfile()
@@ -246,15 +238,12 @@ class FirstApp(cmd2.Cmd):
             if cmd == 'find':
                 company_name = args.arg_list[1]
                 
-                if not self.output_grepeable:
-                    spinner = Halo(text='Gathering Information', spinner='dots')
-                    spinner.start()
+                spinner = Halo(text='Gathering Information', spinner='dots')
+                spinner.start()
 
                 try:
                     found_id, found_staff = self.plugin_instance.get_company_info(company_name)
                 except:
-                    if not self.output_grepeable:
-                        spinner.stop()
                     print(f"[{Fore.RED}-{Style.RESET_ALL}] The company name '{company_name}' does not exist at LinkedIn")
                     return
 
@@ -263,116 +252,56 @@ class FirstApp(cmd2.Cmd):
 
                 #TODO: agregar la opcion para iterar de 25 en 25. Haciendo multiples llamadas a do_loops
                 profiles = self.plugin_instance.do_loops(found_id, outer_loops, depth)
+                
+                api = Linkedin('', '', authenticate = True, cookies = self.plugin_instance.session.cookies)
 
-                self.previous.append({
-                    'name': 'profiles',
-                    'plugin': 'linkedin',
-                    'data': profiles
-                    })
-
-                api = Linkedin(
-                        self.plugin_instance.get_username(),
-                        self.plugin_instance.get_password(),
-                        authenticate = True,
-                        cookies = self.plugin_instance.session.cookies,
-                        )
-
-                if not self.output_grepeable:
-                    spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Listing profiles:')
+                spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Listing profiles:')
                 
                 for i, profile in enumerate(profiles):
-                    if not self.output_grepeable:
-                        print("{:2d}: ".format(i))
-                        print("\tfull name: " + profile['full_name'])
-                        print("\tprofile name: " + profile['profile_name'])
-                        print("\toccupation: " + profile['occupation'])
-                        print("\tpublic identifier: " + profile['publicIdentifier'])
-                        print("\turn: " + profile['urn'])
+                    #TODO: NOW esto capaz tambien, todo lo que es grepeable
+                    print("{:2d}: ".format(i))
+                    print("\tfull name: " + profile['full_name'])
+                    print("\tprofile name: " + profile['profile_name'])
+                    print("\toccupation: " + profile['occupation'])
+                    print("\tpublic identifier: " + profile['publicIdentifier'])
+                    print("\turn: " + profile['urn'])
 
-                        spinner.start()                        
-                        contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
+                    spinner.start()                        
+                    contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
 
-                        for prev_profile in self.previous[-1]['data']:
-                            if prev_profile['publicIdentifier'] == profile['publicIdentifier']:
-                                prev_profile['contact_info'] = contact_info
-                                break
-                        else:
-                            print(f"[{Fore.RED}-{Style.RESET_ALL}] Bug: public_id was not found in prev_profile")
-                        
-                        spinner.stop_and_persist(symbol='🔑'.encode('utf-8'), text='Getting and processing contact info of "{}"'.format(profile['full_name']))
+                    self.queue.put({
+                        'plugin': 'linkedin',
+                        'profile': profile,
+                        'contact_info': contact_info
+                    })
 
-                        print("\tContact info:")
-                        
-                        if contact_info['email_address'] != None:
-                            print("\t\temail: " + contact_info['email_address'])
-                        
-                        if contact_info['websites'] != None and contact_info['websites'] != []:
-                            for i, website in enumerate(contact_info['websites']):
-                                print("\t\twebsite {:d}. {:s}".format(i, website['url']))
-                        
-                        if contact_info['twitter'] != None and contact_info['twitter'] != []:
-                            for i, twitter in enumerate(contact_info['twitter']):
-                                print("\t\ttwitter {:d}. {:s}".format(i, twitter['name']))
-                        
-                        if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
-                            for i, phone in enumerate(contact_info['phone_numbers']):
-                                print("\t\tphone {:d}. {}".format(i, phone))
-                        
-                    else:
-                        contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
-                        
-                        print(",".join([profile['full_name'],
-                                        profile['profile_name'],
-                                        profile['occupation'].replace(',', '.'),
-                                        profile['publicIdentifier'],
-                                        profile['urn']]), end="")
-                        
-                        email_address = '' if contact_info['email_address'] == None else  contact_info['email_address']
-                        websites = []
-                        twitters = []
-                        phones = []
-                        
-                        if contact_info['websites'] != None and contact_info['websites'] != []:
-                            for website in contact_info['websites']:
-                                websites.append(website['url'])
+                    spinner.stop_and_persist(symbol='🔑'.encode('utf-8'), text='Getting and processing contact info of "{}"'.format(profile['full_name']))
 
-                        if contact_info['twitter'] != None and contact_info['twitter'] != []:
-                            for twitter in contact_info['twitter']:
-                                twitters.append(twitter['name'])
-
-                        if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
-                            for phone in contact_info['phone_numbers']:
-                                phones.append(phone)
-
-                        print(",{},{},{},{}".format(email_address, '|'.join(websites), '|'.join(twitters), '|'.join(phones)))
-
-
-                    #TODO: fix this
-                    #connections = api.search_people(connection_of=profile['urn'].split(':')[-1], network_depths='F')
-                    #print(connections)
-
+                    print("\tContact info:")
+                      
+                    if contact_info['email_address'] != None:
+                        print("\t\temail: " + contact_info['email_address'])
+                      
+                    if contact_info['websites'] != None and contact_info['websites'] != []:
+                        for i, website in enumerate(contact_info['websites']):
+                            print("\t\twebsite {:d}. {:s}".format(i, website['url']))
+                      
+                    if contact_info['twitter'] != None and contact_info['twitter'] != []:
+                        for i, twitter in enumerate(contact_info['twitter']):
+                            print("\t\ttwitter {:d}. {:s}".format(i, twitter['name']))
+                       
+                    if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
+                        for i, phone in enumerate(contact_info['phone_numbers']):
+                            print("\t\tphone {:d}. {}".format(i, phone))
+                        
             elif cmd == 'help':
                 print("login: login in linkedin with your credentials")
                 print("find [company]: seek members of the company at linkedin")
                 print("help: show this message")
 
             elif cmd == 'impersonate':
-                print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Using cookies from the browser")
+                print("Using cookies from the browser")
                 self.plugin_instance.impersonate()
-
-            elif cmd == 'login':
-                username = self.plugin_instance.get_username()
-                password = self.plugin_instance.get_password()
-                
-                if username != '' and password != '':
-                    if self.plugin_instance.login():
-                        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Session established.")
-                        
-                    else:
-                        print(f"[{Fore.RED}-{Style.RESET_ALL}] Session could not be established.")
-
-                else:
-                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Fill the options. To see it, use 'show options'.")
 
         elif self.plugin_name == 'github':
             try:
@@ -529,7 +458,10 @@ class FirstApp(cmd2.Cmd):
         cur.close()
 
 if __name__ == '__main__':
+    q = queue.Queue()
+
     c = FirstApp()
+    c.queue = q
     c.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
     ascii_logo = '''
 ___________              .__         .__                 __            

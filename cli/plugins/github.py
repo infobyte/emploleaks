@@ -4,7 +4,7 @@ import json
 from colorama import Style, Fore
 
 class GithubModule:
-    def __init__(self):
+    def __init__(self, queue=None):
         self.options = [{
                 'name': 'token',
                 'value': '',
@@ -17,6 +17,7 @@ class GithubModule:
                 'description': "get fruit over the token"    
             }]
         self.session = requests.Session()
+        self.queue = queue
 
     def get_token(self):
         return self.options[0]['value']
