@@ -184,12 +184,16 @@ class LinkedinModule:
                            ['miniProfile'])
             
             full_name = f"{profile['firstName']} {profile['lastName']}"
-            employee = {'full_name': full_name,
+            
+            try:
+                employee = {'full_name': full_name,
                         'profile_name': profile['publicIdentifier'],
                         'occupation': profile['occupation'],
                         'publicIdentifier': profile['publicIdentifier'],
                         'urn': profile['objectUrn'],
                         }
+            except KeyError:
+                print("profile has no occupation: {}".format(profile))
 
             if len(employee['profile_name']) > 1:
                 found_profiles.append(employee)
