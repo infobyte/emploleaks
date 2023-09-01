@@ -211,9 +211,13 @@ class FirstApp(cmd2.Cmd):
                         config.add_section(self.plugin_name)
 
                     config.set(self.plugin_name, name, value)
-                
+               
+                    if not os.path.exists('config'):
+                         os.mkdir('config')
+
                     with open(self.configfilepath, 'w') as configfile:
                         config.write(configfile)
+                        
 
                 break
         else:
