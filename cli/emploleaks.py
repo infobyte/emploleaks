@@ -6,7 +6,6 @@ import os
 import configparser
 import json
 import io
-import queue
 
 from colorama import Style, Fore
 from halo import Halo
@@ -98,6 +97,13 @@ class FirstApp(cmd2.Cmd):
             func(*args)
         return wrapper
 
+    def do_print(self, args):
+        plugin = args.arg_list[0]
+        
+        for profile in self.queue:
+            if profile['plugin'] == plugin:
+                print(json.dumps(profile))
+        
     @cmd2.with_argparser(parser_connect)
     def do_connect(self, args):
         if self.conn == None:
@@ -269,7 +275,7 @@ class FirstApp(cmd2.Cmd):
                     spinner.start()                        
                     contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
 
-                    self.queue.put({
+                    self.queue.append({
                         'plugin': 'linkedin',
                         'profile': profile,
                         'contact_info': contact_info
@@ -458,10 +464,10 @@ class FirstApp(cmd2.Cmd):
         cur.close()
 
 if __name__ == '__main__':
-    q = queue.Queue()
+    queue = [] # no multi thread supported
 
     c = FirstApp()
-    c.queue = q
+    c.queue = queue
     c.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
     ascii_logo = '''
 ___________              .__         .__                 __            
