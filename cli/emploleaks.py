@@ -6,7 +6,12 @@ import os
 import configparser
 import json
 import io
+import argparse
+import logging
 
+from logging_format import log
+
+from cmd2 import style
 from colorama import Style, Fore
 from halo import Halo
 from prettytable import PrettyTable
@@ -20,7 +25,7 @@ from plugins.linkedin import LinkedinModule
 def dir_path(string):
     if os.path.isdir(string):
         return string
-    print(f'[{Fore.RED}-{Style.RESET_ALL}] {string} is not a valid directory')
+    log.critical(f'{string} is not a valid directory')
 
 parser_connect = cmd2.Cmd2ArgumentParser()
 parser_connect.add_argument('--user',
@@ -63,11 +68,15 @@ autosave_options = cmd2.Cmd2ArgumentParser()
 autosave_options.add_argument('--enable', action="store_true", default=False)
 autosave_options.add_argument('--disable', action="store_true", default=False)
 
-parser_output = cmd2.Cmd2ArgumentParser()
-parser_output.add_argument('--grepeable', action="store_true")
-parser_output.add_argument('--no-grepeable', action='store_true')
-
 class FirstApp(cmd2.Cmd):
+
+    emojis = {
+        'cross': "\U0000274c",
+        "check": "\U00002714",
+        "arrow_up": "\U00002b06",
+        "page": "\U0001f4c4",
+        "laptop": "\U0001f4bb",
+    }
 
     def __init__(self, connector_db=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -84,7 +93,7 @@ class FirstApp(cmd2.Cmd):
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
             if args[0].conn == None:
-                args[0].poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Firstly connect the database with '{Style.BRIGHT}{Fore.WHITE}connect{Style.RESET_ALL}' command")
+                log.warning(f"Firstly connect the database with '{Style.BRIGHT}{Fore.WHITE}connect{Style.RESET_ALL}' command")
                 return
             func(*args)
         return wrapper
@@ -92,7 +101,7 @@ class FirstApp(cmd2.Cmd):
     def plugin_activated(func):
         def wrapper(*args, **kwargs):
             if args[0].plugin_name == '':
-                args[0].poutput(f"[{Fore.RED}-{Style.RESET_ALL}] You need to select a plugin with the '{Style.BRIGHT}{Fore.WHITE}use{Style.RESET_ALL}' command")
+                log.warning(f"You need to select a plugin with the '{Style.BRIGHT}{Fore.WHITE}use{Style.RESET_ALL}' command")
                 return
             func(*args)
         return wrapper
@@ -110,15 +119,15 @@ class FirstApp(cmd2.Cmd):
             try:
                 self.conn = psycopg2.connect(host=args.host, port=args.port,  database=args.dbname, user=args.user, password=args.passwd)
             except psycopg2.OperationalError:
-                self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Database connection failed")
+                log.critical("Database connection failed")
                 return
 
-            self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Connecting to the Leak Database...")
+            log.info("Connecting to the Leak Database...")
         cur = self.conn.cursor()
 
         cur.execute('SELECT version()')
         db_version = cur.fetchone()
-        self.poutput(f"[{Fore.BLUE}*{Style.RESET_ALL}] version: {db_version[0]}")
+        log.warning(f"version: {db_version[0]}")
 
         cur.close()
 
@@ -134,23 +143,15 @@ class FirstApp(cmd2.Cmd):
             for row in cur:
                 table.append([row[1]])
         elif args.domain:
-            self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented, because the db is not indexed by domain")
+            log.error("Not implemented, because the db is not indexed by domain")
             table = [['email', 'password']]
-
-            '''
-            self.poutput("This could take too long, are you sure? [y/N] ")
-            cur.execute(f"SELECT * FROM data WHERE email like '%@{args.domain}'")
-            
-            for row in cur:
-                table.append([row[0], row[1]])
-            '''
 
         if len(table) > 1:
             tab = PrettyTable(table[0])
             tab.add_rows(table[1:])
             self.poutput(tab)
         else:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Password not found for {args.email}")
+            log.error(f"Password not found for {args.email}")
 
         cur.close()
 
@@ -180,14 +181,14 @@ class FirstApp(cmd2.Cmd):
                         module_option['value'] = option[1]
                         break
         except configparser.NoSectionError:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Skipping autoload because there isn't a section named \"{self.plugin_name}\"")
+            log.error(f"Skipping autoload because there isn't a section named \"{self.plugin_name}\"")
             pass
 
     @cmd2.with_argparser(parser_show)
     @plugin_activated
     def do_show(self, args):
         table = self.plugin_instance.do_show(args)
-        self.poutput(tabulate(table, headers='firstrow'))
+        self.poutput(tabulate(table, headers='firstrow', maxcolwidths=[None, 35]))
 
     @plugin_activated
     def do_setopt(self, args):
@@ -204,7 +205,7 @@ class FirstApp(cmd2.Cmd):
         for opt in self.plugin_instance.options:
             if opt['name'] == name:
                 opt['value'] = value
-                self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Updating value successfull")
+                log.info("Updating value successfull")
 
                 if self.autosave:
                     if not config.has_section(self.plugin_name):
@@ -221,21 +222,12 @@ class FirstApp(cmd2.Cmd):
 
                 break
         else:
-            self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Option invalid...")
+            log.error("Option invalid...")
 
     def do_deactivate(self, args):
         self.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
         self.plugin_name = ''
         self.plugin_instance = None
-
-    @cmd2.with_argparser(parser_output)
-    def do_output(self, args):
-        if args.grepeable:
-            self.output_grepeable = True
-            print(f"[{Fore.GREEN}+{Style.RESET_ALL}] grepeable format enabled")
-        elif args.no_grepeable:
-            self.output_grepeable = False
-            print(f"[{Fore.GREEN}+{Style.RESET_ALL}] grepeable format disabled")
 
     @plugin_activated
     def do_run(self, args):
@@ -254,7 +246,7 @@ class FirstApp(cmd2.Cmd):
                 try:
                     found_id, found_staff = self.plugin_instance.get_company_info(company_name)
                 except:
-                    print(f"[{Fore.RED}-{Style.RESET_ALL}] The company name '{company_name}' does not exist at LinkedIn")
+                    log.critical(f"The company name '{company_name}' does not exist at LinkedIn")
                     return
 
                 depth = int((found_staff / 25) + 1)
@@ -265,7 +257,7 @@ class FirstApp(cmd2.Cmd):
                 
                 api = Linkedin('', '', authenticate = True, cookies = self.plugin_instance.session.cookies)
 
-                spinner.stop_and_persist(symbol='🦄'.encode('utf-8'), text='Listing profiles:')
+                spinner.stop_and_persist(symbol=self.emojis['laptop'], text='Listing profiles:')
                 
                 for i, profile in enumerate(profiles):
                     #TODO: NOW esto capaz tambien, todo lo que es grepeable
@@ -285,7 +277,7 @@ class FirstApp(cmd2.Cmd):
                         'contact_info': contact_info
                     })
 
-                    spinner.stop_and_persist(symbol='🔑'.encode('utf-8'), text='Getting and processing contact info of "{}"'.format(profile['full_name']))
+                    spinner.stop_and_persist(symbol=self.emojis['check'], text='Getting and processing contact info of "{}"'.format(profile['full_name']))
 
                     print("\tContact info:")
                       
@@ -303,6 +295,10 @@ class FirstApp(cmd2.Cmd):
                     if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
                         for i, phone in enumerate(contact_info['phone_numbers']):
                             print("\t\tphone {:d}. {}".format(i, phone))
+                    
+                    self.poutput(
+                        style(f"\n{self.emojis['check']} Done", fg='green')
+                    )
                         
             elif cmd == 'help':
                 print("login: login in linkedin with your credentials")
@@ -310,7 +306,7 @@ class FirstApp(cmd2.Cmd):
                 print("help: show this message")
 
             elif cmd == 'impersonate':
-                print("Using cookies from the browser")
+                log.info("Using cookies from the browser")
                 self.plugin_instance.impersonate()
 
         elif self.plugin_name == 'github':
@@ -332,7 +328,7 @@ class FirstApp(cmd2.Cmd):
                     tab.add_rows(fields[1:])
                     print(tab)
                 else:
-                    print(f"[{Fore.RED}-{Style.RESET_ALL}] mail not found")
+                    log.error("mail not found")
 
             elif cmd == 'help':
                 self.plugin_instance.help()
@@ -352,7 +348,7 @@ class FirstApp(cmd2.Cmd):
                 self.poutput(tabulate(fields, headers='firstrow'))
 
             else:
-                print("Argument {} not recognized".format(cmd))
+                log.critical("Argument {} not recognized".format(cmd))
   
         elif self.plugin_name == 'twitter':
             try:
@@ -364,26 +360,26 @@ class FirstApp(cmd2.Cmd):
                 try:
                     self.plugin_instance.run(username = args.arg_list[1])
                 except IndexError:
-                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
+                    log.error("Specify a twitter account as argument")
 
             elif cmd == 'get_tweets':
                 try:
                     self.plugin_instance.get_tweets(username = args.arg_list[1])
                 except IndexError:
-                    print(f"[{Fore.RED}-{Style.RESET_ALL}] Specify a twitter account as argument")
+                    log.error("Specify a twitter account as argument")
 
             elif cmd == 'help':
                 self.plugin_instance.help()
             else:
-                print("Argument {} not recorgnized".format(cmd))
+                log.critical("Argument {} not recorgnized".format(cmd))
 
         else:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Not implemented yet...")
+            log.critical("Not implemented yet...")
         
     @cmd2.with_argparser(autosave_options)       
     def do_autosave(self, args):
         if args.enable and args.disable:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Invalid option, cannot set and unset this feature")
+            log.critical("Invalid option, cannot set and unset this feature")
             return
         
         if args.enable:
@@ -391,7 +387,7 @@ class FirstApp(cmd2.Cmd):
         elif args.disable:
             self.autosave = False
         
-        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autosave " + ('enabled' if self.autosave else 'disabled'))
+        log.info("autosave " + ('enabled' if self.autosave else 'disabled'))
 
     @cmd2.with_argparser(autosave_options)
     def do_autoload(self, args):
@@ -400,12 +396,12 @@ class FirstApp(cmd2.Cmd):
         elif args.disable:
             self.autoload = False
 
-        print(f"[{Fore.GREEN}+{Style.RESET_ALL}] autoload " + ('enabled' if self.autoload else 'disabled'))
+        log.info("autoload " + ('enabled' if self.autoload else 'disabled'))
 
     @cmd2.with_argparser(create_db_parser)
     def do_create_db(self, args):
-        print(f'[{Fore.BLUE}*{Style.RESET_ALL}] The full database occups more than 200 GB, take this in account')
-        print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Creating the database')
+        log.warning('The full database occups more than 200 GB, take this in account')
+        log.warning('Creating the database')
         #create_db_and_user.sh
         os.system('sudo -u postgres psql -c "CREATE DATABASE {0};"'.format(args.dbname))
         os.system('sudo -u postgres psql -c "CREATE USER {0} with encrypted password \'{1}\';"'.format(args.user, args.passwd))
@@ -429,10 +425,10 @@ class FirstApp(cmd2.Cmd):
             try:
                 self.conn = psycopg2.connect(host=args.host, database=args.dbname, user=args.user, password=args.passwd)
             except psycopg2.OperationalError:
-                self.poutput(f"[{Fore.RED}-{Style.RESET_ALL}] Database connection failed")
+                log.critical("Database connection failed")
                 return
 
-            self.poutput(f"[{Fore.GREEN}+{Style.RESET_ALL}] Connecting to the Leak Database...")
+            log.info("Connecting to the Leak Database...")
         cur = self.conn.cursor()
         
         cur.execute("CREATE TABLE IF NOT EXISTS data (email varchar(256) NOT NULL, password varchar(256) NOT NULL);")
@@ -440,7 +436,7 @@ class FirstApp(cmd2.Cmd):
         for root, dirs, files in os.walk(os.path.join(args.comb, "data"), topdown=False):
             for name in files:
                 fname = (os.path.join(root, name))
-                print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Importing from {fname}')
+                log.info(f'Importing from {fname}')
                 
                 with open(fname + '.csv', 'w') as sanitized:
                     with open(fname) as inputfile:
@@ -458,17 +454,25 @@ class FirstApp(cmd2.Cmd):
                 try:
                     cur.execute("COPY data FROM %s CSV ESCAPE '\\';", (fname + '.csv',))
                 except:
-                    print(f'[{Fore.RED}-{Style.RESET_ALL}] May be a malformated entry in the file')
+                    log.critical('May be a malformated entry in the file')
                 # Make the changes to the database persistent
                 self.conn.commit()
 
-        print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Creating index...')
+        log.info('Creating index...')
         cur.execute("CREATE INDEX email_idx_btree ON data USING btree (email);")
 
         cur.close()
 
 if __name__ == '__main__':
-    queue = [] # no multi thread supported
+    parser = argparse.ArgumentParser(description='cross api tool for osint.')
+    parser.add_argument('-d', '--debug', action='store_true', help='enable debug messages')
+    parser.add_argument('-o', '--output-json', action='store', help='export the findings in the file')
+    args = parser.parse_args()
+
+    if args.debug:
+        log.setLevel(logging.DEBUG)
+
+    queue = []
 
     c = FirstApp()
     c.queue = queue

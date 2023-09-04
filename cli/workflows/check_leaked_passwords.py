@@ -23,14 +23,14 @@ if company_name != None:
 print_command = app("print linkedin")
 
 profiles = []
-for line in print_command.stdout.split('\n')[-1]:
+for line in print_command.stdout.split('\n')[:-1]:
     profiles.append(json.loads(line))
 
 for profile in profiles:
     try:
         if profile['contact_info'] != None and profile['contact_info']['email_address'] != None and '@' in profile['contact_info']['email_address']:
             print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Password for "', end='')
-            print('{}" appears at LinkedIn'.format(profile['full_name']))
+            print('{}" appears at LinkedIn'.format(profile['profile']['full_name']))
 
             print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Email: ', end='')
             print(profile['contact_info']['email_address'])

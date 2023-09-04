@@ -23,7 +23,7 @@ if company_name != None:
 print_command = app("print linkedin")
 
 profiles = []
-for line in print_command.stdout.split('\n')[-1]:
+for line in print_command.stdout.split('\n')[:-1]:
     profiles.append(json.loads(line))
 
 for profile in profiles:
@@ -37,7 +37,7 @@ for profile in profiles:
 
                         is_first = False
 
-                    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] github repo located for {profile['full_name']}")
+                    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] github repo located for {profile['profile']['full_name']}")
 
                     username = website.replace('https://github.com', '')
                     username = username.replace('/','')
