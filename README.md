@@ -51,41 +51,55 @@ Right now, the tool supports two functionalities:
 
 ### Retrieving Linkedin Profiles
 
-First, you must set the plugin to use, which in this case is *linkedin*. After, you should set your credentials and the run the *login* proccess:
+First, you must set the plugin to use, which in this case is *linkedin*. After, you should set your authentication tokens and the run the *impersonate* process:
 
 ```
 emploleaks> use --plugin linkedin
-emploleaks(linkedin)> setopt USER myemail@domain.com
+emploleaks(linkedin)> setopt JSESSIONID
+JSESSIONID: 
 [+] Updating value successfull
-emploleaks(linkedin)> setopt PASS mypass1234
+emploleaks(linkedin)> setopt li-at
+li-at: 
 [+] Updating value successfull
 emploleaks(linkedin)> show options
 Module options:
 
-Name    Current Setting     Required    Description
-------  ------------------  ----------  ---------------------------
-USER    myemail@domain.com  yes         linkedin account's username
-PASS    ********            yes         linkedin accout's password
-hide    yes                 no          hide the password field
-emploleaks(linkedin)> run login
-[+] Session established.
+Name        Current Setting                      Required    Description
+----------  -----------------------------------  ----------  -----------------------------------
+hide        yes                                  no          hide the JSESSIONID field
+JSESSIONID  **************************           no          active cookie session in browser #1
+li-at       AQEDAQ74B0YEUS-_AAABilIFFBsAAAGKdhG  no          active cookie session in browser #1
+            YG00AxGP34jz1bRrgAcxkXm9RPNeYIAXz3M
+            cycrQm5FB6lJ-Tezn8GGAsnl_GRpEANRdPI
+            lWTRJJGF9vbv5yZHKOeze_WCHoOpe4ylvET
+            kyCyfN58SNNH
+emploleaks(linkedin)> run impersonate
+[+] Using cookies from the browser
+Setting for first time JSESSIONID
+Setting for first time li_at
 ```
+
+li\_at and JSESSIONID are the authentication cookies of your LinkedIn session on the browser. You can use the Web Developer Tools to get it, just sign-in normally at LinkedIn and press right click and Inspect, those cookies will be in the Storage tab.
 
 Now that the module is configured, you can run it and start gathering information from the company:
 
 ```
 emploleaks(linkedin)> run find EvilCorp
-[+] Added 25 new names.
-[+] Added 22 new names.
-🦄 Listing profiles:
-🔑 Getting and processing contact info of "XYZ ZYX"
+⠙ Gathering Information[+] Added 1 new names.
+💻 Listing profiles:
+ 0: 
+	full name: Joaquin Rodriguez Viruliento
+	profile name: joaquinrodriguezviruliento
+	occupation: Security Researcher at EvilCorp
+	public identifier: joaquinrodriguezviruliento
+	urn: urn:li:member:15736913
+✔ Getting and processing contact info of "Joaquin Rodriguez Viruliento"
 	Contact info:
-	email: xya@gmail.com
-	full name: XYZ XYZ
-	profile name: xyz-xyz
-	occupation: Sr XYZ
-	public identifier: xyz-zyx
-	urn: urn:li:member:67241221
+		website 0. http://www.evilcorp.com
+		twitter 0. limpiamicerca
+
+✔ Done
+
 ```
 
 ### Get Linkedin accounts + Leaked Passwords
@@ -106,17 +120,17 @@ emploleaks(linkedin)> run_pyscript workflows/check_leaked_passwords.py EvilCorp
 [-] Failing login... trying again!
 [+] Connected to the LinkedIn api successfull
 The following command could take a couple of minutes, be patient
-🦄 Listing profiles:
-🔑 Getting and processing contact info of "XYZ ZXY"
-🔑 Getting and processing contact info of "YZX XZY"
-🔑 Getting and processing contact info of "ZYX ZXY"
+ Listing profiles:
+✔ Getting and processing contact info of "señor girafales"
+✔ Getting and processing contact info of "kiko"
+✔ Getting and processing contact info of "el chavo del 8"
 [...]
-[+] Password for "XYZ ZXY" exists
-[*] Email: xyzzxy@gmail.com
+[+] Password for "señor girafales" exists
+[*] Email: girafales@gmail.com
 +------------------+
 | passwords leaked |
 +------------------+
-| laFQqAOSL6t      |
+| laFQqAOSL69      |
 +------------------+
 ```
 
