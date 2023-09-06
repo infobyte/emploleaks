@@ -6,34 +6,27 @@ import json
 from colorama import Fore, Style
 
 try:
-    company = sys.argv[1]
+    company_name = sys.argv[1]
 except IndexError:
-    print(f"[{Fore.RED}-{Style.RESET_ALL}] You need to provide a company name")
-    sys.exit(1)
+    company_name = None
+    print("As you don't provide a company name it will use the previous linkedin profiles loaded")
 
-app('use --plugin linkedin')
-app_handler = app('run login')
+if company_name != None:
+    app('use --plugin linkedin')
+    app_handler = app('run impersonate')
 
-while "LinkedIn has a message for you" in app_handler.stdout:
-    print(f"[{Fore.RED}-{Style.RESET_ALL}] Failing login... trying again!")
-    app_handler = app('run login')
-    time.sleep(1)
+    print("Connected to the LinkedIn api successfull")
+    print("The following command could take a couple of minutes, be pacient")
 
-if "Session" in app_handler.stdout:
-    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] Connected to the LinkedIn api successfull")
+    command_handler = app("run find {}".format(company))
 
-print("The following command could take a couple of minutes, be pacient")
+print_command = app("print linkedin")
 
-command_handler = app("run find {}".format(company))
-previous_command_handler = app("previous linkedin profiles")
+profiles = []
+for line in print_command.stdout.split('\n')[:-1]:
+    profiles.append(json.loads(line))
 
-#print(previous_command_handler.stdout)
-#import pdb;pdb.set_trace()
-linkedin_profiles = json.loads(previous_command_handler.stdout)
-
-#print(linkedin_profiles)
-is_first = True
-for profile in linkedin_profiles:
+for profile in profiles:
     try:
         if profile['contact_info'] != None and profile['contact_info']['websites'] != None:
             for website in profile['contact_info']['websites']:
@@ -44,7 +37,7 @@ for profile in linkedin_profiles:
 
                         is_first = False
 
-                    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] github repo located for {profile['full_name']}")
+                    print(f"[{Fore.GREEN}+{Style.RESET_ALL}] github repo located for {profile['profile']['full_name']}")
 
                     username = website.replace('https://github.com', '')
                     username = username.replace('/','')
@@ -54,16 +47,6 @@ for profile in linkedin_profiles:
                     print(repos_cmd.stdout)
             
                     
-            '''
-            print(f'[{Fore.GREEN}+{Style.RESET_ALL}] Password for "', end='')
-            print('{}" exists'.format(profile['full_name']))
-
-            print(f'[{Fore.BLUE}*{Style.RESET_ALL}] Email: ', end='')
-            print(profile['contact_info']['email_address'])
-
-            find_leaked = app("find --email {}".format(profile['contact_info']['email_address']))
-            print(find_leaked.stdout)
-            '''
     except KeyError:
         pass
 

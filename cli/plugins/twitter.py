@@ -4,7 +4,7 @@ import tweepy
 from colorama import Fore, Style
 
 class TwitterModule:
-    def __init__(self):
+    def __init__(self, queue=None):
         self.options = [{
                 'name': 'BEARER_TOKEN',
                 'value': '',
@@ -38,6 +38,7 @@ class TwitterModule:
             }]
 
         self.client = None
+        self.queue = queue
             
     def do_show(self, args):
         print("Module options:\n")
