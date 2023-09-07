@@ -1,1 +1,3 @@
 2023-09-06 15:10:05,613 - root - INFO - Using cookies from the browser
+2023-09-07 09:56:47,547 - root - INFO - Using cookies from the browser
+2023-09-07 10:00:40,475 - root - INFO - Using cookies from the browser

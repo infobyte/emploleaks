@@ -238,67 +238,70 @@ class FirstApp(cmd2.Cmd):
                 cmd = 'help'
 
             if cmd == 'find':
-                company_name = args.arg_list[1]
-                
-                spinner = Halo(text='Gathering Information', spinner='dots')
-                spinner.start()
-
                 try:
-                    found_id, found_staff = self.plugin_instance.get_company_info(company_name)
-                except:
-                    log.critical(f"The company name '{company_name}' does not exist at LinkedIn")
-                    return
-
-                depth = int((found_staff / 25) + 1)
-                outer_loops = range(0, 1)
-
-                #TODO: agregar la opcion para iterar de 25 en 25. Haciendo multiples llamadas a do_loops
-                profiles = self.plugin_instance.do_loops(found_id, outer_loops, depth)
+                    company_name = args.arg_list[1]
                 
-                api = Linkedin('', '', authenticate = True, cookies = self.plugin_instance.session.cookies)
+                    spinner = Halo(text='Gathering Information', spinner='dots')
+                    spinner.start()
 
-                spinner.stop_and_persist(symbol=self.emojis['laptop'], text='Listing profiles:')
+                    try:
+                        found_id, found_staff = self.plugin_instance.get_company_info(company_name)
+                        spinner.stop()
+                    except:
+                        log.critical(f"The company name '{company_name}' does not exist at LinkedIn")
+                        return
+
+                    depth = int((found_staff / 25) + 1)
+                    outer_loops = range(0, 1)
+
+                    #TODO: agregar la opcion para iterar de 25 en 25. Haciendo multiples llamadas a do_loops
+                    profiles = self.plugin_instance.do_loops(found_id, outer_loops, depth)
                 
-                for i, profile in enumerate(profiles):
-                    #TODO: NOW esto capaz tambien, todo lo que es grepeable
-                    print("{:2d}: ".format(i))
-                    print("\tfull name: " + profile['full_name'])
-                    print("\tprofile name: " + profile['profile_name'])
-                    print("\toccupation: " + profile['occupation'])
-                    print("\tpublic identifier: " + profile['publicIdentifier'])
-                    print("\turn: " + profile['urn'])
+                    api = Linkedin('', '', authenticate = True, cookies = self.plugin_instance.session.cookies)
 
-                    spinner.start()                        
-                    contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
+                    spinner.stop_and_persist(symbol=self.emojis['laptop'], text='Listing profiles:')
+                
+                    for i, profile in enumerate(profiles):
+                        print("{:2d}: ".format(i))
+                        print("\tfull name: " + profile['full_name'])
+                        print("\tprofile name: " + profile['profile_name'])
+                        print("\toccupation: " + profile['occupation'])
+                        print("\tpublic identifier: " + profile['publicIdentifier'])
+                        print("\turn: " + profile['urn'])
 
-                    self.queue.append({
-                        'plugin': 'linkedin',
-                        'profile': profile,
-                        'contact_info': contact_info
-                    })
+                        spinner.start()                        
+                        contact_info = api.get_profile_contact_info(public_id=profile['publicIdentifier'])
 
-                    spinner.stop_and_persist(symbol=self.emojis['check'], text='Getting and processing contact info of "{}"'.format(profile['full_name']))
+                        self.queue.append({
+                            'plugin': 'linkedin',
+                            'profile': profile,
+                            'contact_info': contact_info
+                        })
 
-                    print("\tContact info:")
+                        spinner.stop_and_persist(symbol=self.emojis['check'], text='Getting and processing contact info of "{}"'.format(profile['full_name']))
+
+                        print("\tContact info:")
                       
-                    if contact_info['email_address'] != None:
-                        print("\t\temail: " + contact_info['email_address'])
+                        if contact_info['email_address'] != None:
+                            print("\t\temail: " + contact_info['email_address'])
                       
-                    if contact_info['websites'] != None and contact_info['websites'] != []:
-                        for i, website in enumerate(contact_info['websites']):
-                            print("\t\twebsite {:d}. {:s}".format(i, website['url']))
+                        if contact_info['websites'] != None and contact_info['websites'] != []:
+                            for i, website in enumerate(contact_info['websites']):
+                                print("\t\twebsite {:d}. {:s}".format(i, website['url']))
                       
-                    if contact_info['twitter'] != None and contact_info['twitter'] != []:
-                        for i, twitter in enumerate(contact_info['twitter']):
-                            print("\t\ttwitter {:d}. {:s}".format(i, twitter['name']))
+                        if contact_info['twitter'] != None and contact_info['twitter'] != []:
+                            for i, twitter in enumerate(contact_info['twitter']):
+                                print("\t\ttwitter {:d}. {:s}".format(i, twitter['name']))
                        
-                    if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
-                        for i, phone in enumerate(contact_info['phone_numbers']):
-                            print("\t\tphone {:d}. {}".format(i, phone))
+                        if contact_info['phone_numbers'] != None and contact_info['phone_numbers'] != []:
+                            for i, phone in enumerate(contact_info['phone_numbers']):
+                                print("\t\tphone {:d}. {}".format(i, phone))
                     
-                    self.poutput(
-                        style(f"\n{self.emojis['check']} Done", fg='green')
-                    )
+                        self.poutput(
+                            style(f"\n{self.emojis['check']} Done", fg='green')
+                        )
+                except KeyboardInterrupt:
+                    spinner.stop()
                         
             elif cmd == 'help':
                 print("login: login in linkedin with your credentials")
