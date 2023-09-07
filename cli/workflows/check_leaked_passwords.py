@@ -22,10 +22,17 @@ if company_name != None:
 
 print_command = app("print linkedin")
 
+print_output = app("print core")
+output = None
+if print_output.stdout.count("\n") == 1:
+    output = json.loads(print_output.stdout[:-1])
+    print(f"Loading the issues in format {output['format']} in the file {output['file']}")
+    
 profiles = []
 for line in print_command.stdout.split('\n')[:-1]:
     profiles.append(json.loads(line))
 
+issues = []
 for profile in profiles:
     try:
         if profile['contact_info'] != None and profile['contact_info']['email_address'] != None and '@' in profile['contact_info']['email_address']:
@@ -37,5 +44,16 @@ for profile in profiles:
 
             find_leaked = app("find --email {}".format(profile['contact_info']['email_address']))
             print(find_leaked.stdout)
+
+            if output != None and "leaked" in find_leaked.stdout:
+                issues.append({
+                    'issue': f"password leaked for {profile['profile']['full_name']}",
+                    'description': find_leaked.stdout
+                })
+ 
     except KeyError:
         pass
+
+if issues != []:
+    with open(output['file'], "a") as json_file:
+        json_file.write(json.dumps(issues))

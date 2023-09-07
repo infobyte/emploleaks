@@ -68,6 +68,10 @@ autosave_options = cmd2.Cmd2ArgumentParser()
 autosave_options.add_argument('--enable', action="store_true", default=False)
 autosave_options.add_argument('--disable', action="store_true", default=False)
 
+output_json_opts = cmd2.Cmd2ArgumentParser()
+output_json_opts.add_argument('--filename', action='store', default=None)
+output_json_opts.add_argument('--format', action='store', choices=['json','xml'])
+
 class FirstApp(cmd2.Cmd):
 
     emojis = {
@@ -88,7 +92,6 @@ class FirstApp(cmd2.Cmd):
         
         self.autoload = os.path.isfile(self.configfilepath) # if exists the file autoload = True
         self.autosave = self.autoload
-        self.output_grepeable = False
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -379,6 +382,19 @@ class FirstApp(cmd2.Cmd):
         else:
             log.critical("Not implemented yet...")
         
+    @cmd2.with_argparser(output_json_opts)
+    def do_set_output(self, args):
+        if args.format == 'json' and args.filename != None:
+            self.queue.append({
+                'plugin': 'core',
+                'format': args.format,
+                'file': args.filename
+            })
+        else:
+            log.critical("Not implemented yet...")
+        
+        log.info("All the issues will be loaded in the file")
+
     @cmd2.with_argparser(autosave_options)       
     def do_autosave(self, args):
         if args.enable and args.disable:
@@ -469,7 +485,6 @@ class FirstApp(cmd2.Cmd):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='cross api tool for osint.')
     parser.add_argument('-d', '--debug', action='store_true', help='enable debug messages')
-    parser.add_argument('-o', '--output-json', action='store', help='export the findings in the file')
     args = parser.parse_args()
 
     if args.debug:

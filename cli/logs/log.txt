@@ -1,3 +1,54 @@
 2023-09-06 15:10:05,613 - root - INFO - Using cookies from the browser
 2023-09-07 09:56:47,547 - root - INFO - Using cookies from the browser
 2023-09-07 10:00:40,475 - root - INFO - Using cookies from the browser
+2023-09-07 10:57:22,729 - root - CRITICAL - Not implemented yet...
+2023-09-07 10:57:22,729 - root - INFO - All the issues will be loaded in the file
+2023-09-07 11:02:06,503 - root - INFO - All the issues will be loaded in the file
+2023-09-07 11:02:27,521 - root - INFO - Using cookies from the browser
+2023-09-07 11:03:59,726 - root - CRITICAL - The company name 'patagoniasecurity' does not exist at LinkedIn
+2023-09-07 11:04:06,001 - root - INFO - Using cookies from the browser
+2023-09-07 11:04:39,157 - root - INFO - All the issues will be loaded in the file
+2023-09-07 11:05:59,523 - root - INFO - Using cookies from the browser
+2023-09-07 11:07:07,676 - root - INFO - All the issues will be loaded in the file
+2023-09-07 11:15:41,963 - root - INFO - All the issues will be loaded in the file
+2023-09-07 11:15:57,262 - root - INFO - Using cookies from the browser
+2023-09-07 11:24:14,624 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,638 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,647 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,655 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,662 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,668 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,674 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,681 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 11:24:14,688 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:05:43,995 - root - CRITICAL - Database connection failed
+2023-09-07 12:07:03,552 - root - CRITICAL - Database connection failed
+2023-09-07 12:07:24,479 - root - INFO - Connecting to the Leak Database...
+2023-09-07 12:07:25,041 - root - WARNING - version: PostgreSQL 12.16 (Ubuntu 12.16-0ubuntu0.20.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 9.4.0-1ubuntu1~20.04.1) 9.4.0, 64-bit
+2023-09-07 12:07:29,556 - root - ERROR - Password not found for solidreverser@gmail.com
+2023-09-07 12:07:31,208 - root - ERROR - Password not found for lpigner@gmail.com
+2023-09-07 12:07:31,456 - root - ERROR - Password not found for jvmbruno@protonmail.com
+2023-09-07 12:07:31,718 - root - ERROR - Password not found for famato@faradaysec.com
+2023-09-07 12:16:39,360 - root - INFO - All the issues will be loaded in the file
+2023-09-07 12:16:47,442 - root - INFO - Using cookies from the browser
+2023-09-07 12:21:32,395 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,405 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,412 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,419 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,425 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,431 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,436 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,442 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:21:32,448 - root - WARNING - Firstly connect the database with '[1m[37mconnect[0m' command
+2023-09-07 12:22:14,486 - root - INFO - Connecting to the Leak Database...
+2023-09-07 12:22:14,916 - root - WARNING - version: PostgreSQL 12.16 (Ubuntu 12.16-0ubuntu0.20.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 9.4.0-1ubuntu1~20.04.1) 9.4.0, 64-bit
+2023-09-07 12:22:17,316 - root - ERROR - Password not found for solidreverser@gmail.com
+2023-09-07 12:23:59,047 - root - ERROR - Password not found for solidreverser@gmail.com
+2023-09-07 12:24:49,038 - root - ERROR - Password not found for solidreverser@gmail.com
+2023-09-07 12:24:50,351 - root - ERROR - Password not found for lpigner@gmail.com
+2023-09-07 12:24:50,582 - root - ERROR - Password not found for jvmbruno@protonmail.com
+2023-09-07 12:24:50,814 - root - ERROR - Password not found for famato@faradaysec.com
+2023-09-07 12:28:13,481 - root - ERROR - Password not found for solidreverser@gmail.com
+2023-09-07 12:28:15,046 - root - ERROR - Password not found for lpigner@gmail.com
+2023-09-07 12:28:15,297 - root - ERROR - Password not found for jvmbruno@protonmail.com
+2023-09-07 12:28:15,529 - root - ERROR - Password not found for famato@faradaysec.com
