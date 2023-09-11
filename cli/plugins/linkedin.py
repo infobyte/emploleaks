@@ -78,12 +78,11 @@ class LinkedinModule:
                                     'q=universalName&universalName=' + escaped_name))
 
         if response.status_code == 404:
-            print(f"[{Fore.RED}-{Style.RESET_ALL}] Could not find that company name. Please double-check LinkedIn and try again.")
+            print(f"\n[{Fore.RED}-{Style.RESET_ALL}] Could not find that company name. Please double-check LinkedIn and try again.")
             return
 
         if response.status_code != 200:
             print(f"[{Fore.RED}-{Style.RESET_ALL}] Unexpected HTTP repsonse code {response.status_code} when trying to get the company info:")
-            import pdb;pdb.set_trace()
             return
 
         if 'mwlite' in response.text:

@@ -252,6 +252,7 @@ class FirstApp(cmd2.Cmd):
                         spinner.stop()
                     except:
                         log.critical(f"The company name '{company_name}' does not exist at LinkedIn")
+                        spinner.stop()
                         return
 
                     depth = int((found_staff / 25) + 1)

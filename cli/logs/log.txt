@@ -52,3 +52,13 @@
 2023-09-07 12:28:15,046 - root - ERROR - Password not found for lpigner@gmail.com
 2023-09-07 12:28:15,297 - root - ERROR - Password not found for jvmbruno@protonmail.com
 2023-09-07 12:28:15,529 - root - ERROR - Password not found for famato@faradaysec.com
+2023-09-11 10:04:12,348 - root - INFO - Using cookies from the browser
+2023-09-11 10:04:28,199 - root - CRITICAL - The company name 'petar8' does not exist at LinkedIn
+2023-09-11 10:14:42,786 - root - INFO - Using cookies from the browser
+2023-09-11 10:14:48,948 - root - CRITICAL - The company name 'botellad' does not exist at LinkedIn
+2023-09-11 10:16:55,309 - root - INFO - Using cookies from the browser
+2023-09-11 10:16:59,603 - root - CRITICAL - The company name 'betalla' does not exist at LinkedIn
+2023-09-11 10:20:03,280 - root - INFO - Using cookies from the browser
+2023-09-11 10:20:06,841 - root - CRITICAL - The company name 'belalsd' does not exist at LinkedIn
+2023-09-11 10:21:50,400 - root - INFO - Using cookies from the browser
+2023-09-11 10:21:55,040 - root - CRITICAL - The company name 'puertarse' does not exist at LinkedIn
