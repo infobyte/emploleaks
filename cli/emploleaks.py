@@ -11,7 +11,7 @@ import logging
 
 from logging_format import log
 
-from cmd2 import style
+from cmd2 import style, Fg
 from colorama import Style, Fore
 from halo import Halo
 from prettytable import PrettyTable
@@ -302,7 +302,7 @@ class FirstApp(cmd2.Cmd):
                                 print("\t\tphone {:d}. {}".format(i, phone))
                     
                         self.poutput(
-                            style(f"\n{self.emojis['check']} Done", fg='green')
+                            style(f"\n{self.emojis['check']} Done", fg=Fg['GREEN'])
                         )
                 except KeyboardInterrupt:
                     spinner.stop()
