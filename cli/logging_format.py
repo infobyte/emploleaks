@@ -4,7 +4,8 @@ from logging import handlers
 import sys
 import os
 
-from colorama import Fore, Style    
+from colorama import Fore, Style
+
 
 class CustomFormatter(logging.Formatter):
     def __init__(self, fmt):
@@ -24,6 +25,7 @@ class CustomFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
+
 log = logging.getLogger('')
 log.setLevel(logging.INFO)
 format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -36,6 +38,6 @@ log.addHandler(ch)
 if not os.path.isdir("logs"):
     os.mkdir("logs")
 
-fh = handlers.RotatingFileHandler(os.path.join("logs", "log.txt"), maxBytes=(1048576*5), backupCount=7)
+fh = handlers.RotatingFileHandler(os.path.join("logs", "log.txt"), maxBytes=(1048576 * 5), backupCount=7)
 fh.setFormatter(format)
 log.addHandler(fh)
