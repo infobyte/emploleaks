@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 import time
@@ -18,16 +19,13 @@ if company_name != None:
     print("Connected to the LinkedIn api successfull")
     print("The following command could take a couple of minutes, be pacient")
 
-    command_handler = app("run find {}".format(company))
+    command_handler = app(f"run find {company}")
 
 print_command = app("print linkedin")
 
-profiles = []
-for line in print_command.stdout.split('\n')[:-1]:
-    profiles.append(json.loads(line))
-
+profiles = [json.loads(line) for line in print_command.stdout.split('\n')[:-1]]
 for profile in profiles:
-    try:
+    with contextlib.suppress(KeyError):
         if profile['contact_info'] != None and profile['contact_info']['websites'] != None:
             for website in profile['contact_info']['websites']:
                 if 'github' in website:
@@ -43,10 +41,6 @@ for profile in profiles:
                     username = username.replace('/','')
 
                     print(f"[{Fore.BLUE}*{Style.RESET_ALL}] accessing repos from {username}")
-                    repos_cmd = app('run get_repos {}'.format(username))
+                    repos_cmd = app(f'run get_repos {username}')
                     print(repos_cmd.stdout)
-            
-                    
-    except KeyError:
-        pass
 
