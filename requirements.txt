@@ -9,3 +9,4 @@ clickhouse-driver>=0.2.6
 pyhibp
 tld>=0.13.1
 tldextract>=5.0.0
+holehe>=1.61

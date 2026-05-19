@@ -95,3 +95,25 @@ class BreachOut(BaseModel):
     email: str
     breach_name: str
     breach_date: Optional[str] = None
+
+
+class EmailOut(BaseModel):
+    email_id: int
+    email: str
+    type: str  # "confirmed" or "potential"
+
+
+class EmailCreate(BaseModel):
+    email: str
+    type: str = "confirmed"
+
+
+class SocialProfileOut(BaseModel):
+    profile_id: int
+    platform: str
+    url: Optional[str] = None
+    email_recovery: Optional[str] = None
+    phone_recovery: Optional[str] = None
+    employee_id: int
+    employee_name: Optional[str] = None
+    source_email: Optional[str] = None

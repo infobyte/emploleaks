@@ -19,6 +19,21 @@ async def ensure_columns(db: aiosqlite.Connection):
             await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
         except Exception:
             pass
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS social_profiles (
+            profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            url TEXT,
+            exists_flag BOOLEAN DEFAULT 1,
+            email_recovery TEXT,
+            phone_recovery TEXT,
+            email_id INTEGER,
+            employee_id INTEGER,
+            FOREIGN KEY (email_id) REFERENCES emails (email_id),
+            FOREIGN KEY (employee_id) REFERENCES employees (employee_id)
+        )
+    """)
     await db.commit()
 
 

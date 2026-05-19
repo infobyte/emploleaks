@@ -1,8 +1,17 @@
-const COLORS: Record<string, string> = {
-  pending: "bg-yellow-900/30 text-yellow-400 border-yellow-700/50",
-  verified: "bg-green-900/30 text-green-400 border-green-700/50",
-  not_working: "bg-gray-800/30 text-gray-400 border-gray-600/50",
-  false_positive: "bg-red-900/30 text-red-400 border-red-700/50",
+import { Circle } from "lucide-react";
+
+const STYLES: Record<string, { dot: string; text: string }> = {
+  pending: { dot: "text-yellow-400", text: "text-yellow-400" },
+  verified: { dot: "text-green-400", text: "text-green-400" },
+  not_working: { dot: "text-gray-400", text: "text-gray-400" },
+  false_positive: { dot: "text-red-400", text: "text-red-400" },
+};
+
+const LABELS: Record<string, string> = {
+  pending: "Pending",
+  verified: "Verified",
+  not_working: "Not Working",
+  false_positive: "False Positive",
 };
 
 interface Props {
@@ -11,14 +20,14 @@ interface Props {
 }
 
 export default function TriageBadge({ status, onChange }: Props) {
+  const s = STYLES[status] || STYLES.pending;
+
   if (onChange) {
     return (
       <select
         value={status}
         onChange={(e) => onChange(e.target.value)}
-        className={`text-xs px-2 py-1 rounded-md border cursor-pointer appearance-none bg-bg-tertiary ${
-          COLORS[status] || COLORS.pending
-        }`}
+        className="text-xs px-2 py-1 rounded-md border border-border bg-bg-tertiary text-text-primary cursor-pointer appearance-none focus:outline-none focus:border-accent"
       >
         <option value="pending">Pending</option>
         <option value="verified">Verified</option>
@@ -29,12 +38,9 @@ export default function TriageBadge({ status, onChange }: Props) {
   }
 
   return (
-    <span
-      className={`inline-block text-xs px-2.5 py-1 rounded-full border ${
-        COLORS[status] || COLORS.pending
-      }`}
-    >
-      {status.replace("_", " ")}
+    <span className="inline-flex items-center gap-1.5 text-xs">
+      <Circle className={`w-2 h-2 fill-current ${s.dot}`} />
+      <span className={s.text}>{LABELS[status] || status}</span>
     </span>
   );
 }

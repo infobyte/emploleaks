@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import DeptColumn from "@/components/DeptColumn";
 import EmployeeCard from "@/components/EmployeeCard";
+import { Search, Plus, Sparkles, RefreshCw } from "lucide-react";
 
 export default function EmployeesPage() {
   const companyId = useCompanyId();
@@ -24,6 +25,7 @@ export default function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
   const [newDept, setNewDept] = useState("");
+  const [classifying, setClassifying] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -78,28 +80,22 @@ export default function EmployeesPage() {
     );
   }, [employees, hasDepts, search]);
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as number);
-  };
+  const handleDragStart = (event: DragStartEvent) => setActiveId(event.active.id as number);
 
   const handleDragEnd = async (event: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = event;
     if (!over) return;
-
     const empId = active.id as number;
     const targetDept = String(over.id);
-
     if (departments.includes(targetDept) || targetDept === UNASSIGNED) {
       const newDeptValue = targetDept === UNASSIGNED ? "" : targetDept;
       try {
         await api.updateEmployee(empId, { department: newDeptValue });
         setEmployees((prev) =>
-          prev.map((e) =>
-            e.employee_id === empId ? { ...e, department: newDeptValue || null } : e
-          )
+          prev.map((e) => e.employee_id === empId ? { ...e, department: newDeptValue || null } : e)
         );
-      } catch {}
+      } catch { /* ignore */ }
     }
   };
 
@@ -109,10 +105,8 @@ export default function EmployeesPage() {
     const newVal = emp.excluded ? 0 : 1;
     try {
       await api.updateEmployee(id, { excluded: newVal });
-      setEmployees((prev) =>
-        prev.map((e) => (e.employee_id === id ? { ...e, excluded: newVal } : e))
-      );
-    } catch {}
+      setEmployees((prev) => prev.map((e) => (e.employee_id === id ? { ...e, excluded: newVal } : e)));
+    } catch { /* ignore */ }
   };
 
   const handleDelete = async (id: number) => {
@@ -120,7 +114,7 @@ export default function EmployeesPage() {
     try {
       await api.deleteEmployee(id);
       setEmployees((prev) => prev.filter((e) => e.employee_id !== id));
-    } catch {}
+    } catch { /* ignore */ }
   };
 
   const handleAddDept = async () => {
@@ -137,10 +131,6 @@ export default function EmployeesPage() {
     load();
   };
 
-  const activeEmployee = activeId ? employees.find((e) => e.employee_id === activeId) : null;
-
-  const [classifying, setClassifying] = useState(false);
-
   const handleClassify = async () => {
     if (!companyId) return;
     setClassifying(true);
@@ -148,17 +138,18 @@ export default function EmployeesPage() {
       await api.classifyEmployees(companyId);
       load();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Classification failed";
-      setError(msg);
+      setError(e instanceof Error ? e.message : "Classification failed");
     } finally {
       setClassifying(false);
     }
   };
 
+  const activeEmployee = activeId ? employees.find((e) => e.employee_id === activeId) : null;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-pulse text-text-secondary">Loading employees...</div>
+        <div className="text-sm text-text-secondary animate-pulse">Loading employees...</div>
       </div>
     );
   }
@@ -167,10 +158,10 @@ export default function EmployeesPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <p className="text-danger mb-2">Error loading employees</p>
-          <p className="text-text-secondary text-sm">{error}</p>
-          <button onClick={load} className="mt-4 bg-accent text-bg-primary px-4 py-2 rounded-lg text-sm">
-            Retry
+          <p className="text-sm text-danger mb-1">Error loading employees</p>
+          <p className="text-xs text-text-secondary mb-3">{error}</p>
+          <button onClick={load} className="inline-flex items-center gap-1.5 bg-accent text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-accent-hover transition-colors">
+            <RefreshCw className="w-3 h-3" /> Retry
           </button>
         </div>
       </div>
@@ -178,36 +169,39 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="max-w-full mx-auto space-y-6">
+    <div className="max-w-full mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Employee Management</h1>
-          <p className="text-text-secondary text-sm">
-            {employees.length} employees &middot;{" "}
-            {hasDepts
-              ? "Drag & drop between departments"
-              : "Assign departments to enable Kanban view"}
+          <h1 className="text-xl font-semibold text-text-primary">Employees</h1>
+          <p className="text-sm text-text-secondary mt-0.5">
+            {employees.length} total{hasDepts ? " · Drag between departments" : ""}
           </p>
         </div>
-        {!hasDepts && employees.length > 0 && (
-          <button
-            onClick={handleClassify}
-            disabled={classifying}
-            className="bg-accent text-bg-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors disabled:opacity-50"
-          >
-            {classifying ? "Classifying..." : "Classify with AI"}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!hasDepts && employees.length > 0 && (
+            <button
+              onClick={handleClassify}
+              disabled={classifying}
+              className="inline-flex items-center gap-1.5 bg-accent text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-accent-hover transition-colors disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {classifying ? "Classifying..." : "Classify with AI"}
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <input
-          type="text"
-          placeholder="Search by name or role..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 max-w-sm bg-bg-tertiary border border-border rounded-lg px-4 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
-        />
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
+          <input
+            type="text"
+            placeholder="Search by name or role..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-bg-secondary border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent transition-colors"
+          />
+        </div>
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -215,33 +209,23 @@ export default function EmployeesPage() {
             value={newDept}
             onChange={(e) => setNewDept(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleAddDept()}
-            className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-48"
+            className="bg-bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent w-40 transition-colors"
           />
           <button
             onClick={handleAddDept}
-            className="bg-accent text-bg-primary px-3 py-2 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
+            className="inline-flex items-center gap-1 bg-bg-secondary border border-border text-text-primary px-3 py-2 rounded-lg text-xs font-medium hover:bg-bg-hover transition-colors"
           >
-            Add Dept
+            <Plus className="w-3.5 h-3.5" />
+            Add
           </button>
         </div>
       </div>
 
       {hasDepts ? (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <div className="flex gap-4 overflow-x-auto pb-4">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div className="flex gap-3 overflow-x-auto pb-4">
             {Object.entries(grouped).map(([dept, emps]) => (
-              <DeptColumn
-                key={dept}
-                department={dept}
-                employees={emps}
-                onExclude={handleExclude}
-                onDelete={handleDelete}
-              />
+              <DeptColumn key={dept} department={dept} employees={emps} onExclude={handleExclude} onDelete={handleDelete} />
             ))}
           </div>
           <DragOverlay>
@@ -249,13 +233,14 @@ export default function EmployeesPage() {
           </DragOverlay>
         </DndContext>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filteredList.map((emp) => (
             <EmployeeCard
               key={emp.employee_id}
               employee={emp}
               onExclude={() => handleExclude(emp.employee_id)}
               onDelete={() => handleDelete(emp.employee_id)}
+              onRefresh={load}
             />
           ))}
         </div>

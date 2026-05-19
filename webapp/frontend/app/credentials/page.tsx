@@ -5,6 +5,7 @@ import { useCompanyId } from "../layout";
 import { api, Credential } from "@/lib/api";
 import DataTable from "@/components/DataTable";
 import TriageBadge from "@/components/TriageBadge";
+import { KeyRound, Filter, CheckCircle, XCircle, Ban } from "lucide-react";
 
 export default function CredentialsPage() {
   const companyId = useCompanyId();
@@ -17,18 +18,12 @@ export default function CredentialsPage() {
   useEffect(() => {
     if (!companyId) return;
     setLoading(true);
-    api
-      .getCredentials(companyId)
-      .then(setCreds)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    api.getCredentials(companyId).then(setCreds).catch(() => {}).finally(() => setLoading(false));
   }, [companyId]);
 
   const filtered = useMemo(() => {
     let rows = creds.filter((c) => c.source_type === tab);
-    if (filterStatus !== "all") {
-      rows = rows.filter((c) => c.triage_status === filterStatus);
-    }
+    if (filterStatus !== "all") rows = rows.filter((c) => c.triage_status === filterStatus);
     return rows;
   }, [creds, tab, filterStatus]);
 
@@ -36,13 +31,9 @@ export default function CredentialsPage() {
     try {
       await api.updateCredentialTriage(id, sourceType, status);
       setCreds((prev) =>
-        prev.map((c) =>
-          c.password_id === id && c.source_type === sourceType
-            ? { ...c, triage_status: status }
-            : c
-        )
+        prev.map((c) => c.password_id === id && c.source_type === sourceType ? { ...c, triage_status: status } : c)
       );
-    } catch {}
+    } catch { /* ignore */ }
   };
 
   const handleBulkTriage = async (status: string) => {
@@ -50,14 +41,10 @@ export default function CredentialsPage() {
     try {
       await api.bulkCredentialTriage(Array.from(selected), tab, status);
       setCreds((prev) =>
-        prev.map((c) =>
-          selected.has(c.password_id) && c.source_type === tab
-            ? { ...c, triage_status: status }
-            : c
-        )
+        prev.map((c) => selected.has(c.password_id) && c.source_type === tab ? { ...c, triage_status: status } : c)
       );
       setSelected(new Set());
-    } catch {}
+    } catch { /* ignore */ }
   };
 
   const emailCount = creds.filter((c) => c.source_type === "email").length;
@@ -69,54 +56,37 @@ export default function CredentialsPage() {
           { key: "employee_name", label: "Employee" },
           { key: "identifier", label: "Email" },
           {
-            key: "password",
-            label: "Password",
+            key: "password", label: "Password",
             render: (row: Credential) => (
-              <code className="text-xs bg-bg-tertiary px-2 py-1 rounded font-mono">
-                {row.password}
-              </code>
+              <code className="text-xs bg-bg-tertiary px-2 py-0.5 rounded font-mono">{row.password}</code>
             ),
           },
           { key: "breach_context", label: "Source" },
           {
-            key: "triage_status",
-            label: "Status",
+            key: "triage_status", label: "Status",
             render: (row: Credential) => (
-              <TriageBadge
-                status={row.triage_status}
-                onChange={(s) => handleTriageChange(row.password_id, row.source_type, s)}
-              />
+              <TriageBadge status={row.triage_status} onChange={(s) => handleTriageChange(row.password_id, row.source_type, s)} />
             ),
           },
         ]
       : [
           {
-            key: "identifier",
-            label: "Username",
+            key: "identifier", label: "Username",
             render: (row: Credential) => (
-              <code className="text-xs bg-bg-tertiary px-2 py-1 rounded font-mono">
-                {row.identifier}
-              </code>
+              <code className="text-xs bg-bg-tertiary px-2 py-0.5 rounded font-mono">{row.identifier}</code>
             ),
           },
           {
-            key: "password",
-            label: "Password",
+            key: "password", label: "Password",
             render: (row: Credential) => (
-              <code className="text-xs bg-bg-tertiary px-2 py-1 rounded font-mono">
-                {row.password}
-              </code>
+              <code className="text-xs bg-bg-tertiary px-2 py-0.5 rounded font-mono">{row.password}</code>
             ),
           },
           { key: "breach_context", label: "Source" },
           {
-            key: "triage_status",
-            label: "Status",
+            key: "triage_status", label: "Status",
             render: (row: Credential) => (
-              <TriageBadge
-                status={row.triage_status}
-                onChange={(s) => handleTriageChange(row.password_id, row.source_type, s)}
-              />
+              <TriageBadge status={row.triage_status} onChange={(s) => handleTriageChange(row.password_id, row.source_type, s)} />
             ),
           },
         ];
@@ -124,76 +94,67 @@ export default function CredentialsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-pulse text-text-secondary">Loading credentials...</div>
+        <div className="text-sm text-text-secondary animate-pulse">Loading credentials...</div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-5">
       <div>
-        <h1 className="text-2xl font-bold mb-1">Credential Triage</h1>
-        <p className="text-text-secondary text-sm">
-          Review and classify leaked credentials
-        </p>
+        <h1 className="text-xl font-semibold text-text-primary flex items-center gap-2">
+          <KeyRound className="w-5 h-5 text-text-secondary" />
+          Credentials
+        </h1>
+        <p className="text-sm text-text-secondary mt-0.5">Review and classify leaked credentials</p>
       </div>
 
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="flex bg-bg-secondary border border-border rounded-lg overflow-hidden">
           <button
             onClick={() => { setTab("email"); setSelected(new Set()); }}
-            className={`px-4 py-2 text-sm ${
-              tab === "email"
-                ? "bg-accent text-bg-primary font-medium"
-                : "text-text-secondary hover:text-text-primary"
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === "email" ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"
             }`}
           >
             By Email ({emailCount})
           </button>
           <button
             onClick={() => { setTab("username"); setSelected(new Set()); }}
-            className={`px-4 py-2 text-sm ${
-              tab === "username"
-                ? "bg-accent text-bg-primary font-medium"
-                : "text-text-secondary hover:text-text-primary"
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === "username" ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"
             }`}
           >
             By Username ({usernameCount})
           </button>
         </div>
 
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-        >
-          <option value="all">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="verified">Verified</option>
-          <option value="not_working">Not Working</option>
-          <option value="false_positive">False Positive</option>
-        </select>
+        <div className="flex items-center gap-1.5">
+          <Filter className="w-3.5 h-3.5 text-text-tertiary" />
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="bg-bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent transition-colors"
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="verified">Verified</option>
+            <option value="not_working">Not Working</option>
+            <option value="false_positive">False Positive</option>
+          </select>
+        </div>
 
         {selected.size > 0 && (
-          <div className="flex items-center gap-2 ml-auto">
-            <span className="text-sm text-text-secondary">{selected.size} selected</span>
-            <button
-              onClick={() => handleBulkTriage("verified")}
-              className="bg-success/20 text-success px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-success/30"
-            >
-              Verified
+          <div className="flex items-center gap-2 ml-auto bg-bg-secondary border border-border rounded-lg px-3 py-1.5">
+            <span className="text-xs text-text-secondary">{selected.size} selected</span>
+            <button onClick={() => handleBulkTriage("verified")} className="inline-flex items-center gap-1 text-success text-xs hover:underline">
+              <CheckCircle className="w-3 h-3" /> Verified
             </button>
-            <button
-              onClick={() => handleBulkTriage("not_working")}
-              className="bg-bg-tertiary text-text-secondary px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-bg-tertiary/80"
-            >
-              Not Working
+            <button onClick={() => handleBulkTriage("not_working")} className="inline-flex items-center gap-1 text-text-secondary text-xs hover:underline">
+              <XCircle className="w-3 h-3" /> Not Working
             </button>
-            <button
-              onClick={() => handleBulkTriage("false_positive")}
-              className="bg-danger/20 text-danger px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-danger/30"
-            >
-              False Positive
+            <button onClick={() => handleBulkTriage("false_positive")} className="inline-flex items-center gap-1 text-danger text-xs hover:underline">
+              <Ban className="w-3 h-3" /> False Positive
             </button>
           </div>
         )}

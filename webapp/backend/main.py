@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import get_db, ensure_columns
-from routers import companies, dashboard, employees, credentials, secrets, breaches
+from routers import companies, dashboard, employees, credentials, secrets, breaches, emails, social
 
 
 @asynccontextmanager
@@ -29,6 +29,8 @@ app.include_router(employees.router, prefix="/api")
 app.include_router(credentials.router, prefix="/api")
 app.include_router(secrets.router, prefix="/api")
 app.include_router(breaches.router, prefix="/api")
+app.include_router(emails.router, prefix="/api")
+app.include_router(social.router, prefix="/api")
 
 
 @app.get("/api/health")

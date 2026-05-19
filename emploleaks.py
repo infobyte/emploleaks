@@ -29,6 +29,7 @@ from plugins.linkedin import LinkedinModule
 from plugins.hibp import HaveIBeenPwnedModule
 from utils.ai_classifier import classify_roles
 from utils.leak_parser import parse_file, iter_leak_files
+from utils.email_lookup import lookup_email_sync
 
 # Configurar logging para clickhouse_driver
 clickhouse_logger = logging.getLogger('clickhouse_driver')
@@ -145,6 +146,12 @@ parser_set_ai.add_argument('--model', default='llama3',
 parser_classify = cmd2.Cmd2ArgumentParser()
 parser_classify.add_argument('--force', action='store_true',
                              help='Re-classify even if departments are already assigned')
+
+parser_lookup = cmd2.Cmd2ArgumentParser()
+parser_lookup.add_argument('--include-potential', action='store_true',
+                           help='Also check potential (generated) emails, not just confirmed ones')
+parser_lookup.add_argument('--email', type=str, default=None,
+                           help='Lookup a single specific email address')
 
 autosave_options = cmd2.Cmd2ArgumentParser()
 autosave_options.add_argument('--enable', action="store_true", default=False)
@@ -442,6 +449,21 @@ class EmploLeaksCLI(cmd2.Cmd):
             )
         """)
         
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS social_profiles (
+                profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                url TEXT,
+                exists_flag BOOLEAN DEFAULT 1,
+                email_recovery TEXT,
+                phone_recovery TEXT,
+                email_id INTEGER,
+                employee_id INTEGER,
+                FOREIGN KEY (email_id) REFERENCES emails (email_id),
+                FOREIGN KEY (employee_id) REFERENCES employees (employee_id)
+            )
+        """)
+
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_passwords_unique ON passwords(password, email_id, breach_context)")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_username_passwords_unique ON username_passwords(username, password, breach_context, company_id)")
 
@@ -2684,6 +2706,77 @@ with this command again, pointing to a directory containing credential files.
 
         depts = set(mapping.values())
         log.info(f"Classified {count} employees into {len(depts)} departments: {', '.join(sorted(depts))}")
+
+    @cmd2.with_argparser(parser_lookup)
+    @company_selected
+    def do_lookup_emails(self, args):
+        """Check if employee emails are registered on social media platforms using Holehe.
+
+        By default only checks confirmed emails. Use --include-potential to also check
+        generated email addresses. Use --email to check a single specific email.
+        Does not alert the target email address.
+        """
+        cur = self.local_conn.cursor()
+
+        if args.email:
+            emails_to_check = [{'email': args.email, 'email_id': None, 'employee_id': None, 'name': 'Manual'}]
+        else:
+            cur.execute("""
+                SELECT em.email_id, em.email, e.employee_id, e.name
+                FROM emails em
+                INNER JOIN employees e ON em.employee_id = e.employee_id
+                WHERE e.company_id = ?
+            """, (self.company_id,))
+            emails_to_check = [dict(r) for r in cur.fetchall()]
+
+            if args.include_potential:
+                cur.execute("""
+                    SELECT pe.email_id, pe.email, e.employee_id, e.name
+                    FROM potential_emails pe
+                    INNER JOIN employees e ON pe.employee_id = e.employee_id
+                    WHERE e.company_id = ?
+                """, (self.company_id,))
+                emails_to_check.extend([dict(r) for r in cur.fetchall()])
+
+        if not emails_to_check:
+            log.info("No emails found to lookup. Run LinkedIn scraping first or use --email.")
+            cur.close()
+            return
+
+        log.info(f"Looking up {len(emails_to_check)} email(s) across social platforms...")
+        total_found = 0
+
+        for i, entry in enumerate(emails_to_check, 1):
+            email = entry['email']
+            name = entry.get('name', '')
+            log.info(f"[{i}/{len(emails_to_check)}] Checking {email} ({name})...")
+
+            results = lookup_email_sync(email)
+
+            for r in results:
+                if not r['exists']:
+                    continue
+                if entry.get('employee_id') and entry.get('email_id'):
+                    try:
+                        cur.execute("""
+                            INSERT INTO social_profiles (platform, url, exists_flag, email_recovery, phone_recovery, email_id, employee_id)
+                            VALUES (?, ?, 1, ?, ?, ?, ?)
+                        """, (r['platform'], r['url'], r.get('email_recovery'), r.get('phone_recovery'),
+                              entry['email_id'], entry['employee_id']))
+                    except sqlite3.IntegrityError:
+                        pass
+
+                total_found += 1
+                recovery_info = ""
+                if r.get('email_recovery'):
+                    recovery_info += f" | recovery email: {r['email_recovery']}"
+                if r.get('phone_recovery'):
+                    recovery_info += f" | recovery phone: {r['phone_recovery']}"
+                log.info(f"  [+] {r['platform']}{recovery_info}")
+
+        self.local_conn.commit()
+        cur.close()
+        log.info(f"Lookup complete. Found {total_found} platform registrations.")
 
     @cmd2.with_argparser(parser_findpasswords)
     @leaksdb_connected
