@@ -57,3 +57,12 @@ leaks_data/
 
 # Backup
 backup/
+
+# Node.js
+node_modules/
+.next/
+
+# Webapp
+webapp/backend/venv/
+webapp/frontend/.next/
+webapp/frontend/node_modules/

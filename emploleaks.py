@@ -441,6 +441,19 @@ class EmploLeaksCLI(cmd2.Cmd):
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_passwords_unique ON passwords(password, email_id, breach_context)")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_username_passwords_unique ON username_passwords(username, password, breach_context, company_id)")
 
+        for col, default in [('triage_status', "'pending'"), ('department', 'NULL'), ('excluded', '0')]:
+            for table in ['passwords', 'username_passwords', 'secrets_repos', 'employees']:
+                if col == 'department' and table not in ('employees',):
+                    continue
+                if col == 'excluded' and table != 'employees':
+                    continue
+                if col == 'triage_status' and table == 'employees':
+                    continue
+                try:
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT {default}")
+                except sqlite3.OperationalError:
+                    pass
+
         self.local_conn.commit()
         cur.close()
 
