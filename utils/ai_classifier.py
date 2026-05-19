@@ -11,20 +11,21 @@ import requests
 
 log = logging.getLogger('emploleaks')
 
-CLASSIFICATION_PROMPT = """You are an organizational analyst. Given a list of employee job titles from a company, classify each one into a department/sector.
-
-Use concise department names like: Engineering, Security, Sales, Marketing, Human Resources, Finance, Operations, Legal, Design, Product, Management, IT, Data, Support, Research, Other.
-
-Respond ONLY with a valid JSON object where keys are the exact original titles and values are the department name. Do not include any explanation or markdown formatting.
-
-Example input:
-["Software Engineer", "Head of Sales", "CISO"]
-
-Example output:
-{"Software Engineer": "Engineering", "Head of Sales": "Sales", "CISO": "Security"}
-
-Here are the titles to classify:
-{titles_json}"""
+CLASSIFICATION_PROMPT_TEMPLATE = (
+    'You are an organizational analyst. Given a list of employee job titles '
+    'from a company, classify each one into a department/sector.\n\n'
+    'Use concise department names like: Engineering, Security, Sales, Marketing, '
+    'Human Resources, Finance, Operations, Legal, Design, Product, Management, '
+    'IT, Data, Support, Research, Other.\n\n'
+    'Respond ONLY with a valid JSON object where keys are the exact original '
+    'titles and values are the department name. Do not include any explanation '
+    'or markdown formatting.\n\n'
+    'Example input:\n'
+    '["Software Engineer", "Head of Sales", "CISO"]\n\n'
+    'Example output:\n'
+    '{"Software Engineer": "Engineering", "Head of Sales": "Sales", "CISO": "Security"}\n\n'
+    'Here are the titles to classify:\n'
+)
 
 
 def classify_roles(titles, api_endpoint, api_key, model):
@@ -44,7 +45,7 @@ def classify_roles(titles, api_endpoint, api_key, model):
     if not unique_titles:
         return None
 
-    prompt = CLASSIFICATION_PROMPT.format(titles_json=json.dumps(unique_titles, ensure_ascii=False))
+    prompt = CLASSIFICATION_PROMPT_TEMPLATE + json.dumps(unique_titles, ensure_ascii=False)
 
     url = api_endpoint.rstrip('/') + '/chat/completions'
 

@@ -575,6 +575,18 @@ class EmploLeaksCLI(cmd2.Cmd):
             pot_pwds = cur.fetchall()
             passwords = [f"{r['password']} ({r['breach_context'] or ''})" for r in list(email_pwds) + list(pot_pwds)]
 
+            cur.execute("""
+                SELECT secret_type, secret_value, repo_url, file_path
+                FROM secrets_repos WHERE employee_id = ?
+            """, (eid,))
+            secrets_rows = cur.fetchall()
+            secrets = [
+                f"{r['secret_type']}: {r['secret_value'][:40]}... ({r['repo_url'].split('/')[-1]}/{r['file_path'] or '?'})"
+                if len(r['secret_value'] or '') > 40
+                else f"{r['secret_type']}: {r['secret_value']} ({r['repo_url'].split('/')[-1]}/{r['file_path'] or '?'})"
+                for r in secrets_rows
+            ]
+
             def make_list(items, css_class=''):
                 if not items:
                     return ''
@@ -600,6 +612,8 @@ class EmploLeaksCLI(cmd2.Cmd):
                 details_sections.append(f'<div class="section breach"><h4>Breaches</h4><ul>{make_list(breaches, "breach")}</ul></div>')
             if passwords:
                 details_sections.append(f'<div class="section breach"><h4>Leaked Passwords</h4><ul>{make_list(passwords, "password")}</ul></div>')
+            if secrets:
+                details_sections.append(f'<div class="section breach"><h4>Secrets in Repos</h4><ul>{make_list(secrets, "secret")}</ul></div>')
 
             details_html = ''.join(details_sections) if details_sections else '<p class="no-data">No additional data found.</p>'
             photo_html = f'<img src="{self._html_escape(photo)}" alt="{self._html_escape(name)}" />' if photo else '<div class="no-photo">No Photo</div>'
@@ -617,6 +631,8 @@ class EmploLeaksCLI(cmd2.Cmd):
                 tags_html += '<span class="tag leaked">Passwords</span>'
             if githubs:
                 tags_html += '<span class="tag github">GitHub</span>'
+            if secrets:
+                tags_html += '<span class="tag secrets">Secrets</span>'
 
             card = f'''
             <div class="card" data-name="{self._html_escape(name.lower())}" data-role="{self._html_escape(title.lower())}" data-dept="{self._html_escape((dept or '').lower())}">
@@ -718,6 +734,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .tag.breached {{ background: #6e3226; color: #f85149; }}
 .tag.leaked {{ background: #5a3000; color: #f0883e; }}
 .tag.github {{ background: #1b3a2d; color: #56d364; }}
+.tag.secrets {{ background: #5a1a5e; color: #d2a8ff; }}
 .card-details {{ display: none; padding: 0 20px 20px; border-top: 1px solid #21262d; }}
 .card.open .card-details {{ display: block; padding-top: 16px; }}
 .section {{ margin-bottom: 12px; }}
@@ -726,6 +743,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .section li {{ font-size: 13px; padding: 3px 0; color: #c9d1d9; word-break: break-all; }}
 .section li.breach {{ color: #f85149; }}
 .section li.password {{ color: #f0883e; font-family: monospace; }}
+.section li.secret {{ color: #d2a8ff; font-family: monospace; font-size: 12px; }}
 .section li.email {{ color: #79c0ff; }}
 .section li.potential {{ color: #8b949e; font-style: italic; }}
 .section a {{ color: #58a6ff; text-decoration: none; }}
@@ -1718,6 +1736,18 @@ document.querySelectorAll('.dept-btn').forEach(btn => {{
                                             log.error(f"Database error while adding website: {error}")
                                             self.local_conn.rollback()
 
+                                        if 'github.com' in url or 'gitlab.com' in url:
+                                            try:
+                                                cur.execute(
+                                                    "INSERT INTO githubs(github_url, employee_id) VALUES(?, ?)",
+                                                    (url, employee_id)
+                                                )
+                                                self.local_conn.commit()
+                                            except sqlite3.IntegrityError:
+                                                pass
+                                            except sqlite3.Error as error:
+                                                self.local_conn.rollback()
+
                                 if 'twitter' in contact_info and contact_info['twitter']:
                                     print(f"\n  {Fore.GREEN}Twitter Profiles:{Style.RESET_ALL}")
                                     for i, twitter in enumerate(contact_info['twitter']):
@@ -1767,20 +1797,20 @@ document.querySelectorAll('.dept-btn').forEach(btn => {{
                 cmd = args.arg_list[0]
             except IndexError:
                 self.plugin_instance.help()
+                return
 
             if cmd == 'stalk':
-                if len(args) < 1:
+                if len(args.arg_list) < 2:
                     log.error("Usage: run stalk <github_username>")
                     return
-                self.plugin_instance.stalk(args[0])
+                self.plugin_instance.stalk(args.arg_list[1])
             elif cmd == 'get_repos':
-                if len(args) < 1:
+                if len(args.arg_list) < 2:
                     log.error("Usage: run get_repos <github_username>")
                     return
-                self.plugin_instance.get_repos(args[0])
+                self.plugin_instance.get_repos(args.arg_list[1])
             elif cmd == 'find_secrets':
-                # Check for --download-all flag
-                download_all = '--download-all' in args
+                download_all = '--download-all' in args.arg_list
                 self.plugin_instance.find_secrets(download_all=download_all)
             else:
                 log.error(f"Unknown command: {cmd}")
