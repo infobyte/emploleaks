@@ -142,6 +142,10 @@ parser_set_ai.add_argument('--key', default='ollama',
 parser_set_ai.add_argument('--model', default='llama3',
                            help='Model name (e.g. gpt-4o-mini, llama3, mistral)')
 
+parser_classify = cmd2.Cmd2ArgumentParser()
+parser_classify.add_argument('--force', action='store_true',
+                             help='Re-classify even if departments are already assigned')
+
 autosave_options = cmd2.Cmd2ArgumentParser()
 autosave_options.add_argument('--enable', action="store_true", default=False)
 autosave_options.add_argument('--disable', action="store_true", default=False)
@@ -582,7 +586,7 @@ class EmploLeaksCLI(cmd2.Cmd):
         esc = self._html_escape
 
         cur.execute("""
-            SELECT e.employee_id, e.name, e.title, e.profile_photo_url
+            SELECT e.employee_id, e.name, e.title, e.profile_photo_url, e.department
             FROM employees e WHERE e.company_id = ? ORDER BY e.name
         """, (self.company_id,))
         employees = cur.fetchall()
@@ -592,15 +596,31 @@ class EmploLeaksCLI(cmd2.Cmd):
             cur.close()
             return
 
-        role_to_dept = {}
-        if use_ai:
-            titles = [emp['title'] for emp in employees if emp['title']]
-            role_to_dept = classify_roles(titles, self.ai_endpoint, self.ai_key, self.ai_model) or {}
+        has_departments = any(emp['department'] for emp in employees)
 
-        def get_dept(title):
-            if not use_ai or not role_to_dept:
-                return ''
-            return role_to_dept.get(title, 'Other')
+        if use_ai and not has_departments:
+            if self.ai_endpoint and self.ai_key and self.ai_model:
+                log.info("No departments found. Running AI classification...")
+                titles = [emp['title'] for emp in employees if emp['title']]
+                role_to_dept = classify_roles(titles, self.ai_endpoint, self.ai_key, self.ai_model) or {}
+                if role_to_dept:
+                    for emp in employees:
+                        if emp['title']:
+                            dept = role_to_dept.get(emp['title'], 'Other')
+                            cur.execute("UPDATE employees SET department = ? WHERE employee_id = ?",
+                                        (dept, emp['employee_id']))
+                    self.local_conn.commit()
+                    cur.execute("""
+                        SELECT e.employee_id, e.name, e.title, e.profile_photo_url, e.department
+                        FROM employees e WHERE e.company_id = ? ORDER BY e.name
+                    """, (self.company_id,))
+                    employees = cur.fetchall()
+                    has_departments = True
+            else:
+                log.warning("AI not configured. Use 'set_ai' or 'classify' command first.")
+
+        def get_dept(emp):
+            return emp['department'] or ''
 
         emp_data = []
         all_breaches = []
@@ -612,7 +632,7 @@ class EmploLeaksCLI(cmd2.Cmd):
             name = emp['name'] or ''
             title = emp['title'] or ''
             photo = emp['profile_photo_url'] or ''
-            dept = get_dept(title)
+            dept = get_dept(emp)
 
             cur.execute("SELECT email FROM emails WHERE employee_id = ?", (eid,))
             confirmed = [r['email'] for r in cur.fetchall()]
@@ -753,7 +773,7 @@ class EmploLeaksCLI(cmd2.Cmd):
             </div>'''
             cards_by_dept.setdefault(dept_key, []).append(card)
 
-        if use_ai and role_to_dept:
+        if has_departments:
             sorted_depts = sorted(d for d in cards_by_dept if d != '_ungrouped')
             if '_ungrouped' in cards_by_dept:
                 sorted_depts.append('_ungrouped')
@@ -842,7 +862,7 @@ class EmploLeaksCLI(cmd2.Cmd):
 
         secrets_tab = f'<div class="tab-pane" id="tab-secrets">{secrets_html}</div>'
 
-        ai_subtitle = ' | AI-grouped by department' if use_ai and role_to_dept else ''
+        ai_subtitle = ' | Grouped by department' if has_departments else ''
 
         html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -2616,6 +2636,55 @@ with this command again, pointing to a directory containing credential files.
         })
         log.info(f"AI configured and saved: endpoint={self.ai_endpoint}, model={self.ai_model}")
 
+    @cmd2.with_argparser(parser_classify)
+    @company_selected
+    def do_classify(self, args):
+        """Classify employees into departments using AI based on their job titles.
+
+        Requires AI to be configured (use 'set_ai' first or configure in config/tokens.ini).
+        Departments are saved to the local database and will appear in the HTML report and webapp.
+        Use --force to re-classify employees that already have departments assigned.
+        """
+        if not self.ai_endpoint or not self.ai_key or not self.ai_model:
+            log.warning("AI not configured. Use 'set_ai' command first.")
+            return
+
+        cur = self.local_conn.cursor()
+        if args.force:
+            cur.execute("SELECT employee_id, title FROM employees WHERE company_id = ? AND title IS NOT NULL AND title != ''",
+                        (self.company_id,))
+        else:
+            cur.execute("SELECT employee_id, title FROM employees WHERE company_id = ? AND title IS NOT NULL AND title != '' AND (department IS NULL OR department = '')",
+                        (self.company_id,))
+
+        rows = cur.fetchall()
+        if not rows:
+            log.info("No employees to classify (all already have departments, use --force to re-classify).")
+            cur.close()
+            return
+
+        titles = [r['title'] for r in rows]
+        log.info(f"Classifying {len(titles)} employees...")
+
+        mapping = classify_roles(titles, self.ai_endpoint, self.ai_key, self.ai_model)
+        if not mapping:
+            log.error("AI classification failed.")
+            cur.close()
+            return
+
+        count = 0
+        for row in rows:
+            dept = mapping.get(row['title'], 'Other')
+            cur.execute("UPDATE employees SET department = ? WHERE employee_id = ?",
+                        (dept, row['employee_id']))
+            count += 1
+
+        self.local_conn.commit()
+        cur.close()
+
+        depts = set(mapping.values())
+        log.info(f"Classified {count} employees into {len(depts)} departments: {', '.join(sorted(depts))}")
+
     @cmd2.with_argparser(parser_findpasswords)
     @leaksdb_connected
     @company_selected
@@ -2846,9 +2915,81 @@ with this command again, pointing to a directory containing credential files.
         finally:
             cur.close()
 
+def _launch_webapp(debug=False):
+    """Launch the FastAPI backend and Next.js frontend for the web admin panel."""
+    import subprocess
+    import signal
+    import webbrowser
+    import time
+
+    webapp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webapp')
+    backend_dir = os.path.join(webapp_dir, 'backend')
+    frontend_dir = os.path.join(webapp_dir, 'frontend')
+
+    if not os.path.isdir(backend_dir) or not os.path.isdir(frontend_dir):
+        print("[!] webapp/ directory not found. Make sure the webapp is set up.")
+        return
+
+    venv_python = os.path.join(backend_dir, 'venv', 'bin', 'python')
+    if not os.path.isfile(venv_python):
+        print("[!] Backend virtualenv not found. Run:")
+        print(f"    cd {backend_dir} && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt")
+        return
+
+    node_modules = os.path.join(frontend_dir, 'node_modules')
+    if not os.path.isdir(node_modules):
+        print("[!] Frontend dependencies not installed. Run:")
+        print(f"    cd {frontend_dir} && npm install")
+        return
+
+    procs = []
+
+    def cleanup(sig=None, frame=None):
+        print("\n[*] Shutting down webapp...")
+        for p in procs:
+            try:
+                p.terminate()
+                p.wait(timeout=5)
+            except Exception:
+                p.kill()
+
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
+
+    print(f"""
+{Fore.RED}emploleaks{Style.RESET_ALL} {Fore.CYAN}webapp{Style.RESET_ALL}
+    
+  Backend  → http://localhost:8000  (FastAPI)
+  Frontend → http://localhost:3000  (Next.js)
+  API Docs → http://localhost:8000/docs
+
+  Press Ctrl+C to stop both servers.
+""")
+
+    uvicorn_cmd = [venv_python, '-m', 'uvicorn', 'main:app', '--port', '8000', '--host', '0.0.0.0']
+    if debug:
+        uvicorn_cmd.append('--reload')
+    backend_proc = subprocess.Popen(uvicorn_cmd, cwd=backend_dir)
+    procs.append(backend_proc)
+
+    frontend_proc = subprocess.Popen(['npm', 'run', 'dev'], cwd=frontend_dir)
+    procs.append(frontend_proc)
+
+    time.sleep(3)
+    webbrowser.open('http://localhost:3000')
+
+    try:
+        backend_proc.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        cleanup()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='cross api tool for osint.')
     parser.add_argument('-d', '--debug', action='store_true', help='enable debug messages')
+    parser.add_argument('--webapp', action='store_true', help='launch the web admin panel instead of the CLI')
     args = parser.parse_args()
 
     if args.debug:
@@ -2856,9 +2997,11 @@ if __name__ == '__main__':
         for handler in log.handlers:
             handler.setLevel(logging.DEBUG)
 
-    queue = []
-
-    c = EmploLeaksCLI()
-    c.queue = queue
-    c.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
-    c.cmdloop()
+    if args.webapp:
+        _launch_webapp(debug=args.debug)
+    else:
+        queue = []
+        c = EmploLeaksCLI()
+        c.queue = queue
+        c.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
+        c.cmdloop()

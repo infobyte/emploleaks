@@ -1,8 +1,30 @@
+import logging
+import os
+import sys
+import configparser
 from fastapi import APIRouter, HTTPException, Query
 from database import get_db
 from models import EmployeeOut, EmployeeUpdate, BulkDepartment
 
+PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..')
+sys.path.insert(0, PROJECT_ROOT)
+from utils.ai_classifier import classify_roles
+
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["employees"])
+
+
+def _load_ai_config():
+    config_path = os.path.join(PROJECT_ROOT, 'config', 'tokens.ini')
+    cfg = configparser.ConfigParser()
+    cfg.read(config_path)
+    if 'ai' not in cfg:
+        return None, None, None
+    return (
+        cfg.get('ai', 'endpoint', fallback=None),
+        cfg.get('ai', 'key', fallback=None),
+        cfg.get('ai', 'model', fallback=None),
+    )
 
 
 async def _build_employee(db, emp) -> dict:
@@ -10,7 +32,7 @@ async def _build_employee(db, emp) -> dict:
 
     confirmed = await db.execute_fetchall("SELECT email FROM emails WHERE employee_id = ?", (eid,))
     potential = await db.execute_fetchall("SELECT email FROM potential_emails WHERE employee_id = ?", (eid,))
-    phones_r = await db.execute_fetchall("SELECT phone FROM phones WHERE employee_id = ?", (eid,))
+    phones_r = await db.execute_fetchall("SELECT phone_number FROM phones WHERE employee_id = ?", (eid,))
     websites_r = await db.execute_fetchall("SELECT website_url FROM websites WHERE employee_id = ?", (eid,))
     githubs_r = await db.execute_fetchall("SELECT github_url FROM githubs WHERE employee_id = ?", (eid,))
     twitters_r = await db.execute_fetchall("SELECT twitter_url FROM twitters WHERE employee_id = ?", (eid,))
@@ -60,8 +82,42 @@ async def list_employees(company_id: int = Query(...)):
         )
         results = []
         for r in rows:
-            results.append(await _build_employee(db, r))
+            try:
+                results.append(await _build_employee(db, r))
+            except Exception as e:
+                log.error(f"Error building employee {r['employee_id']}: {e}")
         return results
+
+
+@router.post("/employees/classify")
+async def classify_employees_endpoint(company_id: int = Query(...)):
+    endpoint, key, model = _load_ai_config()
+    if not all([endpoint, key, model]):
+        raise HTTPException(400, "AI not configured. Set up [ai] section in config/tokens.ini or use 'set_ai' in the CLI.")
+
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            "SELECT employee_id, title FROM employees WHERE company_id = ? AND title IS NOT NULL AND title != ''",
+            (company_id,),
+        )
+        if not rows:
+            raise HTTPException(400, "No employees with titles found for this company.")
+
+        titles = [r["title"] for r in rows]
+        mapping = classify_roles(titles, endpoint, key, model)
+        if not mapping:
+            raise HTTPException(500, "AI classification failed. Check logs and AI configuration.")
+
+        count = 0
+        for row in rows:
+            dept = mapping.get(row["title"], "Other")
+            await db.execute(
+                "UPDATE employees SET department = ? WHERE employee_id = ?",
+                (dept, row["employee_id"]),
+            )
+            count += 1
+        await db.commit()
+        return {"classified": count}
 
 
 @router.patch("/employees/bulk-department")

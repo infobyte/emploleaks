@@ -20,6 +20,7 @@ export default function EmployeesPage() {
   const companyId = useCompanyId();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
   const [newDept, setNewDept] = useState("");
@@ -29,10 +30,11 @@ export default function EmployeesPage() {
   const load = useCallback(() => {
     if (!companyId) return;
     setLoading(true);
+    setError(null);
     api
       .getEmployees(companyId)
       .then(setEmployees)
-      .catch(() => {})
+      .catch((e) => setError(e.message || "Failed to load employees"))
       .finally(() => setLoading(false));
   }, [companyId]);
 
@@ -137,10 +139,40 @@ export default function EmployeesPage() {
 
   const activeEmployee = activeId ? employees.find((e) => e.employee_id === activeId) : null;
 
+  const [classifying, setClassifying] = useState(false);
+
+  const handleClassify = async () => {
+    if (!companyId) return;
+    setClassifying(true);
+    try {
+      await api.classifyEmployees(companyId);
+      load();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Classification failed";
+      setError(msg);
+    } finally {
+      setClassifying(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-pulse text-text-secondary">Loading employees...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <p className="text-danger mb-2">Error loading employees</p>
+          <p className="text-text-secondary text-sm">{error}</p>
+          <button onClick={load} className="mt-4 bg-accent text-bg-primary px-4 py-2 rounded-lg text-sm">
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -157,6 +189,15 @@ export default function EmployeesPage() {
               : "Assign departments to enable Kanban view"}
           </p>
         </div>
+        {!hasDepts && employees.length > 0 && (
+          <button
+            onClick={handleClassify}
+            disabled={classifying}
+            className="bg-accent text-bg-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors disabled:opacity-50"
+          >
+            {classifying ? "Classifying..." : "Classify with AI"}
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-4">
@@ -167,24 +208,22 @@ export default function EmployeesPage() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 max-w-sm bg-bg-tertiary border border-border rounded-lg px-4 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent"
         />
-        {hasDepts && (
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="New department..."
-              value={newDept}
-              onChange={(e) => setNewDept(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddDept()}
-              className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-48"
-            />
-            <button
-              onClick={handleAddDept}
-              className="bg-accent text-bg-primary px-3 py-2 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
-            >
-              Add Dept
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="New department..."
+            value={newDept}
+            onChange={(e) => setNewDept(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddDept()}
+            className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent w-48"
+          />
+          <button
+            onClick={handleAddDept}
+            className="bg-accent text-bg-primary px-3 py-2 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
+          >
+            Add Dept
+          </button>
+        </div>
       </div>
 
       {hasDepts ? (
