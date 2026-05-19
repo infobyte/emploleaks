@@ -15,6 +15,8 @@ EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con interfaz C
 - Exportación de resultados a CSV
 - Sistema modular de plugins (LinkedIn, GitHub, HIBP)
 - Autoguardado y carga automática de configuración de plugins
+- Búsqueda de perfiles en redes sociales (~120 plataformas) con Holehe
+- Webapp administrativa con FastAPI + Next.js para triage de resultados
 
 ## Estructura del Proyecto
 
@@ -31,7 +33,8 @@ emploleaks/
 ├── utils/
 │   ├── logging_format.py     # Configuración de logging con colores
 │   ├── ai_classifier.py      # Clasificación de roles con IA (OpenAI/Ollama)
-│   └── leak_parser.py        # Parser de archivos de leaks con detección AI
+│   ├── leak_parser.py        # Parser de archivos de leaks con detección AI
+│   └── email_lookup.py       # Búsqueda de emails en redes sociales (Holehe)
 ├── workflows/                # Scripts de automatización (legacy)
 │   ├── check_leaked_passwords.py
 │   └── get_public_repos.py
@@ -44,6 +47,9 @@ emploleaks/
 │   └── tokens.ini            # Tokens y credenciales de plugins (no en git)
 ├── data/                     # Base de datos local (autogenerado)
 │   └── emploleaks.db         # SQLite con toda la información recopilada
+├── webapp/                   # Webapp administrativa
+│   ├── backend/              # FastAPI (Python)
+│   └── frontend/             # Next.js (React/TypeScript)
 └── logs/                     # Archivos de log (autogenerado)
     └── log.txt
 ```
@@ -104,7 +110,7 @@ python emploleaks.py -d
 |---------|-------------|
 | `add_company --name <nombre>` | Agrega una nueva empresa |
 | `select_company --name <nombre>` | Selecciona una empresa para trabajar |
-| `list_companies list` | Muestra todas las empresas |
+| `list_companies` | Muestra todas las empresas |
 | `delete_company --name <nombre>` | Elimina una empresa y todos sus datos |
 
 ### Gestión de Plugins
@@ -166,18 +172,44 @@ Si ClickHouse está disponible al iniciar, la conexión se establece automática
 | `print --data all --html --ai` | Genera reporte HTML agrupando empleados por departamento usando IA |
 | `print --data <tipo> --export` | Exporta los datos a un archivo CSV con timestamp |
 
-### Configuración de IA
+### Email Lookup (Redes Sociales)
 
 | Comando | Descripción |
 |---------|-------------|
-| `set_ai --endpoint <url> --key <key> --model <modelo>` | Configura el proveedor de IA para clasificación de roles |
+| `lookup_emails` | Busca emails confirmados en ~120 plataformas (X, Instagram, Spotify, etc.) |
+| `lookup_emails --include-potential` | Incluye también los emails generados |
+| `lookup_emails --email user@mail.com` | Busca un email específico |
 
-La clasificación por IA analiza los títulos/roles de los empleados y los agrupa por departamento (Engineering, Security, Sales, etc.) en el reporte HTML.
+Utiliza la técnica de "forgot password" para determinar si un email está registrado en cada plataforma, sin alertar al dueño de la cuenta. Los resultados se guardan en la tabla `social_profiles` de SQLite.
+
+### Configuración de IA y Clasificación
+
+| Comando | Descripción |
+|---------|-------------|
+| `set_ai --endpoint <url> --key <key> --model <modelo>` | Configura el proveedor de IA |
+| `classify` | Clasifica empleados en departamentos usando IA (se guarda en la BD) |
+| `classify --force` | Re-clasifica aunque ya tengan departamento asignado |
+
+La clasificación por IA analiza los títulos/roles de los empleados y los agrupa por departamento (Engineering, Security, Sales, etc.). Los departamentos se persisten en SQLite y son visibles en el reporte HTML y en la webapp.
 
 **Proveedores soportados** (cualquier API compatible con OpenAI):
 - **Ollama (local, por defecto):** `set_ai --endpoint http://localhost:11434/v1 --model llama3`
 - **OpenAI:** `set_ai --endpoint https://api.openai.com/v1 --key sk-... --model gpt-4o-mini`
 - **Cualquier otro compatible:** LM Studio, Together AI, etc.
+
+### Webapp Administrativa
+
+| Comando | Descripción |
+|---------|-------------|
+| `python emploleaks.py --webapp` | Lanza la webapp (backend en :8000, frontend en :3000) |
+
+La webapp permite:
+- Navegar empleados, credenciales, secretos y brechas de forma visual
+- Triage de credenciales y secretos (marcar como verificado, no funciona, falso positivo)
+- Edición de emails (agregar, modificar, eliminar)
+- Drag & drop de empleados entre departamentos
+- Clasificación con IA desde la interfaz
+- Dashboard con estadísticas y hallazgos clave
 
 ---
 
@@ -355,6 +387,7 @@ Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al 
 | `phones` | Números de teléfono |
 | `websites` | Sitios web personales |
 | `secrets_repos` | Secretos encontrados en repositorios con gitleaks |
+| `social_profiles` | Perfiles en redes sociales encontrados con Holehe |
 
 ---
 
@@ -363,29 +396,44 @@ Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al 
 ```
 1. python emploleaks.py
 
+# Gestión de empresa
 2. add_company --name target_corp
 3. select_company --name target_corp
 
+# Scraping de LinkedIn
 4. use --plugin linkedin
 5. setopt JSESSIONID <cookie>
 6. setopt li-at <cookie>
 7. run impersonate
 8. run find target_corp targetcorp.com --email-format {n}.{s}
-
 9. print --data emails
 
-10. find_passwords only_emails          # (ClickHouse se conecta automáticamente desde config)
+# Credenciales filtradas (ClickHouse se conecta automáticamente desde config)
+10. find_passwords only_emails
 
-12. use --plugin hibp
-13. setopt apikey <hibp_key>
-14. find_breaches
+# Brechas conocidas
+11. use --plugin hibp
+12. setopt apikey <hibp_key>
+13. find_breaches
 
-15. use --plugin github
-16. setopt token <github_token>
-17. run find_secrets
+# Secretos en repositorios
+14. use --plugin github
+15. setopt token <github_token>
+16. run find_secrets
 
-18. print --data all --export
-19. print --data all --html --ai
+# Perfiles en redes sociales
+17. deactivate
+18. lookup_emails
+
+# Clasificación por departamento
+19. classify
+
+# Reportes y exportación
+20. print --data all --export
+21. print --data all --html --ai
+
+# Webapp para triage interactivo
+22. python emploleaks.py --webapp
 ```
 
 ## Disclaimer

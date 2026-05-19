@@ -76,7 +76,7 @@ parser_connect.add_argument('--port',
                                    default="5432",
                                    help="the database's port")
 
-parser_connect_leaks = cmd2.Cmd2ArgumentParser()
+parser_connect_leaks = cmd2.Cmd2ArgumentParser(description="Connect to the ClickHouse leaks database for credential searches.")
 parser_connect_leaks.add_argument('--user', default=None,
                                    help="ClickHouse user (default: from config or 'default')")
 parser_connect_leaks.add_argument('--passwd', default=None,
@@ -93,7 +93,7 @@ parser_connect_leaks.add_argument('--secure',
 parser_connect_leaks.add_argument('--save', action='store_true',
                                    help="save connection settings to config")
 
-create_db_parser = cmd2.Cmd2ArgumentParser()
+create_db_parser = cmd2.Cmd2ArgumentParser(description="Create and initialize a ClickHouse database for storing leaked credentials.")
 create_db_parser.add_argument('--user', required=True, help='ClickHouse database user')
 create_db_parser.add_argument('--passwd', required=True, help='ClickHouse database password')
 create_db_parser.add_argument('--dbname', required=True, help='Name of the ClickHouse database to create')
@@ -102,40 +102,36 @@ create_db_parser.add_argument('--port', default='9000', help='ClickHouse server 
 create_db_parser.add_argument('--secure', action='store_true', help='Use secure connection (TLS)')
 create_db_parser.add_argument('--import-data', help='Optional: Path to a directory containing credential files to import (format: email:password:url)')
 
-parser_find = cmd2.Cmd2ArgumentParser()
-parser_find.add_argument('--email')
-parser_find.add_argument('--domain')
+parser_use = cmd2.Cmd2ArgumentParser(description="Load a plugin module (linkedin, github, hibp).")
+parser_use.add_argument('--plugin', choices=['github', 'linkedin', 'hibp'],
+                        help='Plugin to activate: linkedin (employee scraping), github (secrets scanning), hibp (breach lookup)')
 
-parser_use = cmd2.Cmd2ArgumentParser()
-parser_use.add_argument('--plugin',choices=['github', 'linkedin','hibp'])
+parser_show = cmd2.Cmd2ArgumentParser(description="Show available options and their current values for the active plugin.")
+parser_show.add_argument('options', help='Type "options" to display plugin settings')
 
-parser_show = cmd2.Cmd2ArgumentParser()
-parser_show.add_argument('options')
+parser_find_breaches = cmd2.Cmd2ArgumentParser(description="Search for breaches in all company emails using HaveIBeenPwned API. Requires HIBP plugin active.")
 
-parser_find_breaches = cmd2.Cmd2ArgumentParser()
-parser_find_breaches.description = "Search for breaches in all company emails using HaveIBeenPwned API"
+parser_addcompany = cmd2.Cmd2ArgumentParser(description="Add a new company to the local database.")
+parser_addcompany.add_argument('--name', required=True, help='Name of the company to add')
 
-parser_addcompany = cmd2.Cmd2ArgumentParser()
-parser_addcompany.add_argument('--name')
+parser_selectcompany = cmd2.Cmd2ArgumentParser(description="Select a company to work with from the local database.")
+parser_selectcompany.add_argument('--name', required=True, help='Name of the company to select')
 
-parser_selectcompany = cmd2.Cmd2ArgumentParser()
-parser_selectcompany.add_argument('--name')
+parser_listcompanies = cmd2.Cmd2ArgumentParser(description="List all companies in the local database.")
 
-parser_listcompanies = cmd2.Cmd2ArgumentParser()
-parser_listcompanies.add_argument('list')
-
-parser_findpasswords = cmd2.Cmd2ArgumentParser()
+parser_findpasswords = cmd2.Cmd2ArgumentParser(description="Search for leaked credentials in ClickHouse using emails/usernames from the local database.")
 parser_findpasswords.add_argument('mode', choices=['find_all', 'only_usernames', 'only_emails'],
                                 help='Search mode: find_all (search everything), only_usernames (search by usernames only), only_emails (search by emails only)')
-parser_findpasswords.add_argument('--email', type=str, help='Buscar contraseñas filtradas para un correo específico (no se guarda en la base)')
+parser_findpasswords.add_argument('--email', type=str, help='Search for a specific email address (results not saved to local DB)')
 
-parser_print = cmd2.Cmd2ArgumentParser()
-parser_print.add_argument('--data',choices=['emails', 'passwords', 'breaches', 'gits', 'phones', 'twitters', 'websites', 'all', 'secrets'])
+parser_print = cmd2.Cmd2ArgumentParser(description="Display or export collected data for the selected company.")
+parser_print.add_argument('--data', choices=['emails', 'passwords', 'breaches', 'gits', 'phones', 'twitters', 'websites', 'all', 'secrets'],
+                          help='Type of data to display')
 parser_print.add_argument('--export', action='store_true', help='Export data to CSV file')
 parser_print.add_argument('--html', action='store_true', help='Generate interactive HTML report (only with --data all)')
 parser_print.add_argument('--ai', action='store_true', help='Use AI to group employees by department in HTML report')
 
-parser_set_ai = cmd2.Cmd2ArgumentParser()
+parser_set_ai = cmd2.Cmd2ArgumentParser(description="Configure the AI provider for role classification and report grouping.")
 parser_set_ai.add_argument('--endpoint', default='http://localhost:11434/v1',
                            help='OpenAI-compatible API endpoint (default: Ollama local)')
 parser_set_ai.add_argument('--key', default='ollama',
@@ -143,41 +139,35 @@ parser_set_ai.add_argument('--key', default='ollama',
 parser_set_ai.add_argument('--model', default='llama3',
                            help='Model name (e.g. gpt-4o-mini, llama3, mistral)')
 
-parser_classify = cmd2.Cmd2ArgumentParser()
+parser_classify = cmd2.Cmd2ArgumentParser(description="Classify employees into departments using AI based on their job titles.")
 parser_classify.add_argument('--force', action='store_true',
                              help='Re-classify even if departments are already assigned')
 
-parser_lookup = cmd2.Cmd2ArgumentParser()
+parser_lookup = cmd2.Cmd2ArgumentParser(description="Check if employee emails are registered on social media platforms using Holehe (~120 platforms, does not alert the target).")
 parser_lookup.add_argument('--include-potential', action='store_true',
                            help='Also check potential (generated) emails, not just confirmed ones')
 parser_lookup.add_argument('--email', type=str, default=None,
                            help='Lookup a single specific email address')
 
-autosave_options = cmd2.Cmd2ArgumentParser()
-autosave_options.add_argument('--enable', action="store_true", default=False)
-autosave_options.add_argument('--disable', action="store_true", default=False)
+autosave_options = cmd2.Cmd2ArgumentParser(description="Enable or disable automatic saving/loading of plugin configurations.")
+autosave_options.add_argument('--enable', action="store_true", default=False, help='Enable the feature')
+autosave_options.add_argument('--disable', action="store_true", default=False, help='Disable the feature')
 
-output_json_opts = cmd2.Cmd2ArgumentParser()
-output_json_opts.add_argument('--filename', action='store', default=None)
-output_json_opts.add_argument('--format', action='store', choices=['json','xml'])
 
-parser_deletecompany = cmd2.Cmd2ArgumentParser()
-parser_deletecompany.add_argument('--name', required=True, help='name of the company to delete')
+
+parser_deletecompany = cmd2.Cmd2ArgumentParser(description="Delete a company and all its associated data from the local database.")
+parser_deletecompany.add_argument('--name', required=True, help='Name of the company to delete')
 
 parser_run_find = cmd2.Cmd2ArgumentParser()
 parser_run_find.add_argument('company_name', help='LinkedIn company name')
 parser_run_find.add_argument('company_domain', help='Company email domain')
 parser_run_find.add_argument('--email-format', help='Optional email format for potential emails (e.g. {n}.{s} for first initial + last name)')
 
-parser_import_leaks = cmd2.Cmd2ArgumentParser()
+parser_import_leaks = cmd2.Cmd2ArgumentParser(description="Import credential leak files into ClickHouse. Supports txt, csv, dat, zip, gz formats with AI-powered format detection.")
 parser_import_leaks.add_argument('directory', nargs='?', default=None,
                                   help='Directory with leak files (default: leaks_data/)')
 parser_import_leaks.add_argument('--no-ai', action='store_true',
                                   help='Skip AI format detection for unknown files')
-
-# Create parsers for commands
-parser_use = argparse.ArgumentParser(description='Use a plugin')
-parser_use.add_argument('--plugin', required=True, help='Plugin to use')
 
 class GroupConcat:
     def __init__(self):
@@ -1106,6 +1096,17 @@ document.querySelectorAll('.data-table th').forEach(th => {{
     @cmd2.with_argparser(parser_print)
     @company_selected
     def do_print(self, args):
+        """Display or export collected OSINT data for the selected company.
+
+        Examples:
+            print --data all              Show all collected data
+            print --data emails           Show confirmed and potential emails
+            print --data passwords        Show leaked credentials found
+            print --data secrets          Show secrets found in repositories
+            print --data breaches         Show data breach records
+            print --html --ai             Generate HTML report with AI department grouping
+            print --data all --export     Export all data to CSV
+        """
         cur = self.local_conn.cursor()
         
         # Get current timestamp for filename
@@ -1776,7 +1777,17 @@ document.querySelectorAll('.data-table th').forEach(th => {{
     @cmd2.with_argparser(parser_use)
     @company_selected
     def do_use(self, args):
-        """Use a plugin"""
+        """Activate a plugin module for OSINT operations.
+
+        Available plugins:
+            linkedin    Scrape employee profiles, emails, contact info, and photos
+            github      Scan repositories for leaked secrets using gitleaks
+            hibp        Check employee emails against HaveIBeenPwned breach database
+
+        After activating a plugin, use 'show options' to see configuration,
+        'setopt' to set values, and 'run' to execute plugin commands.
+        Use 'deactivate' to unload the plugin.
+        """
         if args.plugin == 'github':
             self.plugin_name = 'github'
             self.plugin_instance = GithubModule(queue=self.queue, local_conn=self.local_conn, company_id=self.company_id)
