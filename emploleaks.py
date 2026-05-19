@@ -27,6 +27,7 @@ from tabulate import tabulate
 from plugins.github import GithubModule
 from plugins.linkedin import LinkedinModule
 from plugins.hibp import HaveIBeenPwnedModule
+from utils.ai_classifier import classify_roles
 
 # Configurar logging para clickhouse_driver
 clickhouse_logger = logging.getLogger('clickhouse_driver')
@@ -134,6 +135,15 @@ parser_print = cmd2.Cmd2ArgumentParser()
 parser_print.add_argument('--data',choices=['emails', 'passwords', 'breaches', 'gits', 'phones', 'twitters', 'websites', 'all', 'secrets'])
 parser_print.add_argument('--export', action='store_true', help='Export data to CSV file')
 parser_print.add_argument('--html', action='store_true', help='Generate interactive HTML report (only with --data all)')
+parser_print.add_argument('--ai', action='store_true', help='Use AI to group employees by department in HTML report')
+
+parser_set_ai = cmd2.Cmd2ArgumentParser()
+parser_set_ai.add_argument('--endpoint', default='http://localhost:11434/v1',
+                           help='OpenAI-compatible API endpoint (default: Ollama local)')
+parser_set_ai.add_argument('--key', default='ollama',
+                           help='API key (default: "ollama" for local Ollama)')
+parser_set_ai.add_argument('--model', default='llama3',
+                           help='Model name (e.g. gpt-4o-mini, llama3, mistral)')
 
 autosave_options = cmd2.Cmd2ArgumentParser()
 autosave_options.add_argument('--enable', action="store_true", default=False)
@@ -231,6 +241,10 @@ class EmploLeaksCLI(cmd2.Cmd):
         self.configfilepath = os.path.join(CONFIG_DIR, 'tokens.ini')
         self.autoload = os.path.isfile(self.configfilepath)
         self.autosave = self.autoload
+        
+        self.ai_endpoint = 'http://localhost:11434/v1'
+        self.ai_key = 'ollama'
+        self.ai_model = 'llama3'
         
         # Emojis para la interfaz
         self.emojis = {
@@ -456,7 +470,7 @@ class EmploLeaksCLI(cmd2.Cmd):
             func(*args)
         return wrapper
 
-    def _generate_html_report(self, filename):
+    def _generate_html_report(self, filename, use_ai=False):
         """Generate an interactive HTML report with employee data and profile photos."""
         cur = self.local_conn.cursor()
 
@@ -473,38 +487,46 @@ class EmploLeaksCLI(cmd2.Cmd):
             cur.close()
             return
 
-        cards_html = []
+        role_to_dept = {}
+        departments = {}
+        if use_ai:
+            titles = [emp['title'] for emp in employees if emp['title']]
+            role_to_dept = classify_roles(titles, self.ai_endpoint, self.ai_key, self.ai_model) or {}
+
+        def get_dept(title):
+            if not use_ai or not role_to_dept:
+                return None
+            return role_to_dept.get(title, 'Other')
+
+        cards_by_dept = {}
+        card_count_with_email = 0
+        card_count_breached = 0
+
         for emp in employees:
             eid = emp['employee_id']
             name = emp['name'] or ''
             title = emp['title'] or ''
             photo = emp['profile_photo_url'] or ''
+            dept = get_dept(title)
 
-            # Confirmed emails
             cur.execute("SELECT email FROM emails WHERE employee_id = ?", (eid,))
             confirmed = [r['email'] for r in cur.fetchall()]
 
-            # Potential emails
             cur.execute("SELECT email FROM potential_emails WHERE employee_id = ?", (eid,))
             potential = [r['email'] for r in cur.fetchall()]
 
-            # Phones
             cur.execute("SELECT phone_number FROM phones WHERE employee_id = ?", (eid,))
             phones = [r['phone_number'] for r in cur.fetchall()]
 
-            # Websites
-            cur.execute("SELECT website_url FROM websites WHERE employee_id = ? ", (eid,))
+            cur.execute("SELECT website_url FROM websites WHERE employee_id = ?", (eid,))
             websites = [r['website_url'] for r in cur.fetchall()]
 
-            # GitHub
             cur.execute("SELECT github_url FROM githubs WHERE employee_id = ?", (eid,))
             githubs = [r['github_url'] for r in cur.fetchall()]
 
-            # Twitter
             cur.execute("SELECT twitter_url FROM twitters WHERE employee_id = ?", (eid,))
             twitters = [r['twitter_url'] for r in cur.fetchall()]
 
-            # Breaches
             cur.execute("""
                 SELECT b.breach_name, b.breach_date FROM breaches b
                 INNER JOIN emails em ON b.email_id = em.email_id
@@ -512,7 +534,6 @@ class EmploLeaksCLI(cmd2.Cmd):
             """, (eid,))
             breaches = [f"{r['breach_name']} ({r['breach_date'] or '?'})" for r in cur.fetchall()]
 
-            # Passwords
             cur.execute("""
                 SELECT p.password, p.breach_context FROM passwords p
                 INNER JOIN emails em ON p.email_id = em.email_id
@@ -527,7 +548,6 @@ class EmploLeaksCLI(cmd2.Cmd):
             pot_pwds = cur.fetchall()
             passwords = [f"{r['password']} ({r['breach_context'] or ''})" for r in list(email_pwds) + list(pot_pwds)]
 
-            # Build detail lines
             def make_list(items, css_class=''):
                 if not items:
                     return ''
@@ -555,21 +575,24 @@ class EmploLeaksCLI(cmd2.Cmd):
                 details_sections.append(f'<div class="section breach"><h4>Leaked Passwords</h4><ul>{make_list(passwords, "password")}</ul></div>')
 
             details_html = ''.join(details_sections) if details_sections else '<p class="no-data">No additional data found.</p>'
-
             photo_html = f'<img src="{self._html_escape(photo)}" alt="{self._html_escape(name)}" />' if photo else '<div class="no-photo">No Photo</div>'
 
             tags_html = ''
+            if dept:
+                tags_html += f'<span class="tag dept">{self._html_escape(dept)}</span>'
             if confirmed:
                 tags_html += '<span class="tag confirmed">Email</span>'
+                card_count_with_email += 1
             if breaches:
                 tags_html += '<span class="tag breached">Breached</span>'
+                card_count_breached += 1
             if passwords:
                 tags_html += '<span class="tag leaked">Passwords</span>'
             if githubs:
                 tags_html += '<span class="tag github">GitHub</span>'
 
             card = f'''
-            <div class="card" data-name="{self._html_escape(name.lower())}" data-role="{self._html_escape(title.lower())}">
+            <div class="card" data-name="{self._html_escape(name.lower())}" data-role="{self._html_escape(title.lower())}" data-dept="{self._html_escape((dept or '').lower())}">
                 <div class="card-header">
                     <div class="photo">{photo_html}</div>
                     <div class="info">
@@ -580,11 +603,49 @@ class EmploLeaksCLI(cmd2.Cmd):
                 </div>
                 <div class="card-details">{details_html}</div>
             </div>'''
-            cards_html.append(card)
+
+            dept_key = dept or '_ungrouped'
+            cards_by_dept.setdefault(dept_key, []).append(card)
 
         total = len(employees)
-        total_emails = sum(1 for c in cards_html if 'confirmed' in c)
-        total_breached = sum(1 for c in cards_html if 'breached' in c)
+
+        if use_ai and role_to_dept:
+            sorted_depts = sorted(d for d in cards_by_dept if d != '_ungrouped')
+            if '_ungrouped' in cards_by_dept:
+                sorted_depts.append('_ungrouped')
+            
+            dept_count = len([d for d in sorted_depts if d != '_ungrouped'])
+            
+            dept_nav_items = []
+            for d in sorted_depts:
+                label = d if d != '_ungrouped' else 'Uncategorized'
+                count = len(cards_by_dept[d])
+                dept_nav_items.append(
+                    f'<button class="dept-btn" data-dept="{self._html_escape(d.lower())}">'
+                    f'{self._html_escape(label)} <span class="dept-count">{count}</span></button>'
+                )
+            dept_nav_items.insert(0,
+                '<button class="dept-btn active" data-dept="all">'
+                f'All <span class="dept-count">{total}</span></button>'
+            )
+            dept_nav = f'<div class="dept-nav">{"".join(dept_nav_items)}</div>'
+
+            grid_content = ''
+            for d in sorted_depts:
+                label = d if d != '_ungrouped' else 'Uncategorized'
+                grid_content += f'<div class="dept-section" data-dept-section="{self._html_escape(d.lower())}">'
+                grid_content += f'<h2 class="dept-title">{self._html_escape(label)} <span class="dept-badge">{len(cards_by_dept[d])}</span></h2>'
+                grid_content += f'<div class="grid">{"".join(cards_by_dept[d])}</div>'
+                grid_content += '</div>'
+        else:
+            dept_nav = ''
+            dept_count = 0
+            all_cards = []
+            for cards in cards_by_dept.values():
+                all_cards.extend(cards)
+            grid_content = f'<div class="grid" id="grid">{"".join(all_cards)}</div>'
+
+        dept_stat = f'<div class="stat"><div class="num">{dept_count}</div><div class="label">Departments</div></div>' if use_ai and role_to_dept else ''
 
         html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -599,14 +660,22 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .header h1 {{ font-size: 28px; color: #f0f6fc; margin-bottom: 5px; }}
 .header h1 span {{ color: #f85149; }}
 .header .subtitle {{ color: #8b949e; font-size: 14px; }}
-.stats {{ display: flex; gap: 20px; margin-top: 15px; }}
+.stats {{ display: flex; gap: 20px; margin-top: 15px; flex-wrap: wrap; }}
 .stat {{ background: #21262d; padding: 10px 18px; border-radius: 8px; border: 1px solid #30363d; }}
 .stat .num {{ font-size: 22px; font-weight: 700; color: #58a6ff; }}
 .stat .label {{ font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }}
 .controls {{ padding: 20px 40px; background: #161b22; border-bottom: 1px solid #30363d; }}
 .search {{ width: 100%; padding: 10px 16px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-size: 14px; outline: none; }}
 .search:focus {{ border-color: #58a6ff; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; padding: 24px 40px; }}
+.dept-nav {{ padding: 16px 40px; background: #0d1117; border-bottom: 1px solid #30363d; display: flex; gap: 8px; flex-wrap: wrap; }}
+.dept-btn {{ background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }}
+.dept-btn:hover {{ border-color: #58a6ff; color: #f0f6fc; }}
+.dept-btn.active {{ background: #1f6feb; border-color: #1f6feb; color: #fff; }}
+.dept-count {{ background: rgba(255,255,255,0.15); padding: 1px 7px; border-radius: 10px; font-size: 11px; }}
+.dept-section {{ margin-bottom: 8px; }}
+.dept-title {{ font-size: 20px; color: #f0f6fc; padding: 20px 40px 8px; display: flex; align-items: center; gap: 10px; }}
+.dept-badge {{ background: #1f6feb; color: #fff; font-size: 13px; padding: 2px 10px; border-radius: 12px; font-weight: 600; }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; padding: 12px 40px 24px; }}
 .card {{ background: #161b22; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; transition: border-color 0.2s; }}
 .card:hover {{ border-color: #58a6ff; }}
 .card-header {{ display: flex; gap: 16px; padding: 20px; cursor: pointer; }}
@@ -617,6 +686,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .info .role {{ font-size: 13px; color: #8b949e; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 .tags {{ margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }}
 .tag {{ padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
+.tag.dept {{ background: #272d38; color: #a5d6ff; border: 1px solid #384860; }}
 .tag.confirmed {{ background: #0d419d; color: #79c0ff; }}
 .tag.breached {{ background: #6e3226; color: #f85149; }}
 .tag.leaked {{ background: #5a3000; color: #f0883e; }}
@@ -640,28 +710,51 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 <body>
 <div class="header">
     <h1><span>emploleaks</span> // {self._html_escape(self.company_name)}</h1>
-    <p class="subtitle">Generated {time.strftime("%Y-%m-%d %H:%M:%S")}</p>
+    <p class="subtitle">Generated {time.strftime("%Y-%m-%d %H:%M:%S")}{' | AI-grouped by department' if use_ai and role_to_dept else ''}</p>
     <div class="stats">
         <div class="stat"><div class="num">{total}</div><div class="label">Employees</div></div>
-        <div class="stat"><div class="num">{total_emails}</div><div class="label">With Email</div></div>
-        <div class="stat"><div class="num">{total_breached}</div><div class="label">Breached</div></div>
+        {dept_stat}
+        <div class="stat"><div class="num">{card_count_with_email}</div><div class="label">With Email</div></div>
+        <div class="stat"><div class="num">{card_count_breached}</div><div class="label">Breached</div></div>
     </div>
 </div>
 <div class="controls">
-    <input type="text" class="search" placeholder="Filter by name or role..." id="search" />
+    <input type="text" class="search" placeholder="Filter by name, role or department..." id="search" />
 </div>
-<div class="grid" id="grid">
-{''.join(cards_html)}
+{dept_nav}
+<div id="content">
+{grid_content}
 </div>
 <script>
 document.querySelectorAll('.card-header').forEach(h => {{
     h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
 }});
-document.getElementById('search').addEventListener('input', e => {{
+const searchInput = document.getElementById('search');
+searchInput.addEventListener('input', e => {{
     const q = e.target.value.toLowerCase();
     document.querySelectorAll('.card').forEach(c => {{
-        const match = c.dataset.name.includes(q) || c.dataset.role.includes(q);
+        const match = c.dataset.name.includes(q) || c.dataset.role.includes(q) || (c.dataset.dept && c.dataset.dept.includes(q));
         c.classList.toggle('hidden', !match);
+    }});
+    document.querySelectorAll('.dept-section').forEach(s => {{
+        const visible = s.querySelectorAll('.card:not(.hidden)').length;
+        s.classList.toggle('hidden', visible === 0);
+    }});
+}});
+document.querySelectorAll('.dept-btn').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+        document.querySelectorAll('.dept-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const dept = btn.dataset.dept;
+        if (dept === 'all') {{
+            document.querySelectorAll('.dept-section').forEach(s => s.classList.remove('hidden'));
+        }} else {{
+            document.querySelectorAll('.dept-section').forEach(s => {{
+                s.classList.toggle('hidden', s.dataset.deptSection !== dept);
+            }});
+        }}
+        searchInput.value = '';
+        document.querySelectorAll('.card').forEach(c => c.classList.remove('hidden'));
     }});
 }});
 </script>
@@ -705,7 +798,7 @@ document.getElementById('search').addEventListener('input', e => {{
 
         if args.data == 'all' and args.html:
             html_filename = f"{timestamp}_{self.company_name}_report.html"
-            self._generate_html_report(html_filename)
+            self._generate_html_report(html_filename, use_ai=args.ai)
             cur.close()
             return
 
@@ -2102,6 +2195,19 @@ with this command again, pointing to a directory containing credential files.
             log.info("[+] Disconnected from leaks database")
         else:
             log.warning("[!] Not connected to any database")
+
+    @cmd2.with_argparser(parser_set_ai)
+    def do_set_ai(self, args):
+        """Configure AI provider for role classification in reports.
+        
+        Supports any OpenAI-compatible API:
+        - Ollama (local, default): --endpoint http://localhost:11434/v1 --model llama3
+        - OpenAI: --endpoint https://api.openai.com/v1 --key sk-... --model gpt-4o-mini
+        """
+        self.ai_endpoint = args.endpoint
+        self.ai_key = args.key
+        self.ai_model = args.model
+        log.info(f"AI configured: endpoint={self.ai_endpoint}, model={self.ai_model}")
 
     @cmd2.with_argparser(parser_findpasswords)
     @leaksdb_connected

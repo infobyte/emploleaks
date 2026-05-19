@@ -10,6 +10,8 @@ EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con interfaz C
 - Verificación de brechas conocidas con la API de HaveIBeenPwned
 - Escaneo de secretos en repositorios GitHub/GitLab con gitleaks
 - Almacenamiento local de toda la información en SQLite
+- Generación de reportes HTML interactivos con fotos de perfil
+- Clasificación automática de empleados por departamento usando IA (OpenAI, Ollama, etc.)
 - Exportación de resultados a CSV
 - Sistema modular de plugins (LinkedIn, GitHub, HIBP)
 - Autoguardado y carga automática de configuración de plugins
@@ -27,7 +29,8 @@ emploleaks/
 │   ├── github.py             # Plugin de GitHub (repos, stalk, secrets)
 │   └── hibp.py               # Plugin de HaveIBeenPwned (brechas)
 ├── utils/
-│   └── logging_format.py     # Configuración de logging con colores
+│   ├── logging_format.py     # Configuración de logging con colores
+│   └── ai_classifier.py     # Clasificación de roles con IA (OpenAI/Ollama)
 ├── workflows/                # Scripts de automatización (legacy)
 │   ├── check_leaked_passwords.py
 │   └── get_public_repos.py
@@ -142,7 +145,22 @@ python emploleaks.py -d
 | `print --data websites` | Muestra sitios web |
 | `print --data secrets` | Muestra secretos encontrados en repositorios |
 | `print --data all` | Muestra todo consolidado por empleado |
+| `print --data all --html` | Genera un reporte HTML interactivo con fotos |
+| `print --data all --html --ai` | Genera reporte HTML agrupando empleados por departamento usando IA |
 | `print --data <tipo> --export` | Exporta los datos a un archivo CSV con timestamp |
+
+### Configuración de IA
+
+| Comando | Descripción |
+|---------|-------------|
+| `set_ai --endpoint <url> --key <key> --model <modelo>` | Configura el proveedor de IA para clasificación de roles |
+
+La clasificación por IA analiza los títulos/roles de los empleados y los agrupa por departamento (Engineering, Security, Sales, etc.) en el reporte HTML.
+
+**Proveedores soportados** (cualquier API compatible con OpenAI):
+- **Ollama (local, por defecto):** `set_ai --endpoint http://localhost:11434/v1 --model llama3`
+- **OpenAI:** `set_ai --endpoint https://api.openai.com/v1 --key sk-... --model gpt-4o-mini`
+- **Cualquier otro compatible:** LM Studio, Together AI, etc.
 
 ---
 
@@ -336,12 +354,9 @@ emploleaks(miempresa)> print --data passwords
 17. run find_secrets
 
 18. print --data all --export
+19. print --data all --html --ai
 ```
 
 ## Disclaimer
 
 Esta herramienta está diseñada únicamente para fines educativos, de investigación en seguridad y pruebas de penetración autorizadas. El uso de esta herramienta para actividades maliciosas o no autorizadas está estrictamente prohibido. Los usuarios son responsables de cumplir con todas las leyes y términos de servicio aplicables.
-
-emploleaks(f)(linkedin)> setopt JSESSIONID ajax:2879580135233792831
-[+] Updating value successfull
-emploleaks(f)(linkedin)> setopt li-at AQEDAWXbSjMB0js_AAABnPxoCDEAAAGdIHSMMU0AFhUxs-qYd0Qia0eXL0pM8KOTciw7vPZSBus-yak5NiDqjXeUf6S5OG2WVVEJ79GtCdcDmbTa9HGYN2g87JzuXuEcm8m2ouhFqEDyeytpVpuP3Buq
