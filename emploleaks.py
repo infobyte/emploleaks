@@ -246,6 +246,8 @@ class EmploLeaksCLI(cmd2.Cmd):
         self.ai_key = 'ollama'
         self.ai_model = 'llama3'
         
+        self._load_global_config()
+        
         # Emojis para la interfaz
         self.emojis = {
             'profile': "👤",
@@ -428,6 +430,31 @@ class EmploLeaksCLI(cmd2.Cmd):
         
         self.local_conn.commit()
         cur.close()
+
+    def _load_global_config(self):
+        """Load global settings (AI, etc.) from config file on startup."""
+        if not os.path.isfile(self.configfilepath):
+            return
+        config = configparser.RawConfigParser()
+        config.read(self.configfilepath)
+
+        if config.has_section('ai'):
+            self.ai_endpoint = config.get('ai', 'endpoint', fallback=self.ai_endpoint)
+            self.ai_key = config.get('ai', 'key', fallback=self.ai_key)
+            self.ai_model = config.get('ai', 'model', fallback=self.ai_model)
+            log.debug(f"AI config loaded: model={self.ai_model}")
+
+    def _save_config_section(self, section, values):
+        """Save a section of key-value pairs to the config file."""
+        config = configparser.RawConfigParser()
+        config.read(self.configfilepath)
+        if not config.has_section(section):
+            config.add_section(section)
+        for k, v in values.items():
+            config.set(section, k, v)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(self.configfilepath, 'w') as f:
+            config.write(f)
 
     def __del__(self):
         """Cleanup database connections on object destruction"""
@@ -2199,15 +2226,22 @@ with this command again, pointing to a directory containing credential files.
     @cmd2.with_argparser(parser_set_ai)
     def do_set_ai(self, args):
         """Configure AI provider for role classification in reports.
-        
+
         Supports any OpenAI-compatible API:
         - Ollama (local, default): --endpoint http://localhost:11434/v1 --model llama3
         - OpenAI: --endpoint https://api.openai.com/v1 --key sk-... --model gpt-4o-mini
+
+        Settings are automatically saved to config/tokens.ini.
         """
         self.ai_endpoint = args.endpoint
         self.ai_key = args.key
         self.ai_model = args.model
-        log.info(f"AI configured: endpoint={self.ai_endpoint}, model={self.ai_model}")
+        self._save_config_section('ai', {
+            'endpoint': self.ai_endpoint,
+            'key': self.ai_key,
+            'model': self.ai_model,
+        })
+        log.info(f"AI configured and saved: endpoint={self.ai_endpoint}, model={self.ai_model}")
 
     @cmd2.with_argparser(parser_findpasswords)
     @leaksdb_connected
