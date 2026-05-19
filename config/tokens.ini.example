@@ -1,0 +1,69 @@
+# EmploLeaks configuration template.
+#
+# Copy this file to `config/tokens.ini` and fill in the values you want.
+# `config/tokens.ini` is gitignored — your secrets stay local.
+#
+# Every section below is OPTIONAL. The CLI only auto-loads the sections
+# that are present, so you can start with just `[clickhouse]` and add
+# the others as you need them.
+
+# --- AI provider (OpenAI-compatible) ----------------------------------------
+# Used by the agentic leak parser and the employee/department classifier.
+# Works with OpenAI, Ollama (local), LM Studio, Together AI, etc.
+[ai]
+endpoint = https://api.openai.com/v1
+key = sk-your-openai-key-here
+model = gpt-4o-mini
+# Local Ollama example:
+# endpoint = http://localhost:11434/v1
+# key = ollama
+# model = llama3
+
+# --- LinkedIn cookies -------------------------------------------------------
+# Extract from your browser's DevTools (Application → Cookies → linkedin.com).
+[linkedin]
+jsessionid = ajax:0000000000000000000
+li-at = your-li-at-cookie-here
+
+# --- GitHub personal access token -------------------------------------------
+# Needed for the github plugin (gitleaks over employee repos).
+# Create one at https://github.com/settings/tokens with `public_repo` scope.
+[github]
+token = ghp_your_github_token_here
+
+# --- Holehe (email → registered platforms) ----------------------------------
+# Subset of the ~120 platforms Holehe knows; comma-separated.
+# Use `lookup_emails --list-platforms` to see the full list.
+[holehe]
+platforms = google, discord, github, instagram, twitter, spotify, snapchat, pinterest, adobe, amazon
+
+# --- Infrastructure discovery -----------------------------------------------
+# `assetfinder` is always used (binary expected on $PATH).
+# SecurityTrails is optional — uncomment and set the key to enable it.
+[discovery]
+# securitytrails_key =
+
+# --- Maigret (username → social profiles) -----------------------------------
+# Comma-separated list of platforms. Defaults applied if omitted.
+[maigret]
+platforms = instagram, twitter, facebook, tiktok, github, reddit, pinterest, youtube, telegram, spotify
+
+# --- ClickHouse (local credential dump storage) -----------------------------
+# Defaults match `clickhouse-docker/docker-compose.yml`.
+[clickhouse]
+host = localhost
+port = 19000
+user = default
+passwd =
+dbname = credentials_db
+
+# --- Telegram userbot scraper (telegram_sync.py) ----------------------------
+# Get api_id / api_hash from https://my.telegram.org/apps
+# `session` and `download_root` are paths relative to the repo root.
+[telegram]
+api_id = 0000000
+api_hash = your-telegram-api-hash-here
+session = config/telegram.session
+download_root = leaks_data/telegram
+allowed_extensions = txt, csv, dat, zip, gz
+default_backfill_limit = 10

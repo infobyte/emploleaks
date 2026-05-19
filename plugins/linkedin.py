@@ -5,7 +5,6 @@ import json
 from urllib.parse import urlparse
 from urllib.parse import unquote
 
-from halo import Halo
 from colorama import Fore, Style
 from utils.logging_format import log
 
@@ -258,6 +257,55 @@ class LinkedinModule:
             return root_url + seg
         return ''
 
+    def _extract_company_logo(self, company_data):
+        """Extract company logo URL from the LinkedIn company API response.
+        Recursively searches for vectorImage in logo-related fields."""
+        import logging
+        log = logging.getLogger(__name__)
+
+        def find_best_image_url(obj):
+            """Recursively find vectorImage with rootUrl+artifacts or full URL artifacts."""
+            if not isinstance(obj, dict):
+                return ''
+            if 'rootUrl' in obj and 'artifacts' in obj:
+                root = obj['rootUrl']
+                artifacts = obj['artifacts']
+                if artifacts:
+                    best = max(artifacts, key=lambda a: a.get('width', 0))
+                    seg = best.get('fileIdentifyingUrlPathSegment', '')
+                    if seg.startswith('http'):
+                        return seg
+                    if root:
+                        return root + seg
+            for v in obj.values():
+                if isinstance(v, dict):
+                    result = find_best_image_url(v)
+                    if result:
+                        return result
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict):
+                            result = find_best_image_url(item)
+                            if result:
+                                return result
+            return ''
+
+        for field in ['logo', 'logoV2', 'squareLogoV2', 'squareLogo', 'heroImage']:
+            data = company_data.get(field)
+            if data:
+                url = find_best_image_url(data)
+                if url:
+                    log.debug(f"Company logo found in '{field}': {url[:80]}...")
+                    return url
+
+        url = find_best_image_url(company_data)
+        if url:
+            log.debug(f"Company logo found via deep search: {url[:80]}...")
+            return url
+
+        log.debug(f"Company logo not found. Available keys: {list(company_data.keys())}")
+        return ''
+
     def _extract_photo_from_entity(self, entity):
         """Extract profile photo URL from a search result entity by recursively
         looking for vectorImage in the image field."""
@@ -430,8 +478,14 @@ class LinkedinModule:
         found_website = company.get('companyPageUrl', "NOT FOUND")
 
         found_id = company['trackingInfo']['objectUrn'].split(':')[-1]
+
+        logo_url = ''
+        try:
+            logo_url = self._extract_company_logo(company)
+        except Exception:
+            pass
         
-        return (found_id, found_staff)
+        return (found_id, found_staff, logo_url)
 
     def do_loops(self, company_id, company_domain, outer_loops, depth, email_format=None):
         profiles_list = []

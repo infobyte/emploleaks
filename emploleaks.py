@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import cmd2
-import psycopg2
 import sqlite3
 import getpass
+import hashlib
 import os
 import configparser
 import json
@@ -12,6 +12,7 @@ import logging
 import clickhouse_driver
 import logging.handlers
 import time
+from datetime import datetime, timezone
 from tld import get_tld, get_fld
 from tld.utils import update_tld_names
 import tldextract
@@ -20,7 +21,6 @@ from utils.logging_format import log
 
 from cmd2 import style, Fg
 from colorama import Style, Fore
-from halo import Halo
 from prettytable import PrettyTable
 from tabulate import tabulate
 #from plugins.twitter import TwitterModule
@@ -119,13 +119,15 @@ parser_selectcompany.add_argument('--name', required=True, help='Name of the com
 
 parser_listcompanies = cmd2.Cmd2ArgumentParser(description="List all companies in the local database.")
 
-parser_findpasswords = cmd2.Cmd2ArgumentParser(description="Search for leaked credentials in ClickHouse using emails/usernames from the local database.")
+parser_findpasswords = cmd2.Cmd2ArgumentParser(description="Search for leaked credentials in ClickHouse and ProxyNova COMB using emails/usernames from the local database.")
 parser_findpasswords.add_argument('mode', choices=['find_all', 'only_usernames', 'only_emails'],
                                 help='Search mode: find_all (search everything), only_usernames (search by usernames only), only_emails (search by emails only)')
 parser_findpasswords.add_argument('--email', type=str, help='Search for a specific email address (results not saved to local DB)')
+parser_findpasswords.add_argument('--no-proxynova', action='store_true', help='Skip ProxyNova COMB API search')
+parser_findpasswords.add_argument('--no-clickhouse', action='store_true', help='Skip ClickHouse search (use only ProxyNova)')
 
 parser_print = cmd2.Cmd2ArgumentParser(description="Display or export collected data for the selected company.")
-parser_print.add_argument('--data', choices=['emails', 'passwords', 'breaches', 'gits', 'phones', 'twitters', 'websites', 'all', 'secrets'],
+parser_print.add_argument('--data', choices=['emails', 'passwords', 'breaches', 'gits', 'phones', 'twitters', 'websites', 'all', 'secrets', 'domains', 'subdomains'],
                           help='Type of data to display')
 parser_print.add_argument('--export', action='store_true', help='Export data to CSV file')
 parser_print.add_argument('--html', action='store_true', help='Generate interactive HTML report (only with --data all)')
@@ -167,11 +169,22 @@ parser_run_find.add_argument('company_name', help='LinkedIn company name')
 parser_run_find.add_argument('company_domain', help='Company email domain')
 parser_run_find.add_argument('--email-format', help='Optional email format for potential emails (e.g. {n}.{s} for first initial + last name)')
 
-parser_import_leaks = cmd2.Cmd2ArgumentParser(description="Import credential leak files into ClickHouse. Supports txt, csv, dat, zip, gz formats with AI-powered format detection.")
+parser_import_leaks = cmd2.Cmd2ArgumentParser(description="Import credential leak files into ClickHouse. Supports txt, csv, dat, zip, gz formats with AI-powered format detection. Files are tracked by SHA-256 so repeat runs skip already-imported content.")
 parser_import_leaks.add_argument('directory', nargs='?', default=None,
                                   help='Directory with leak files (default: leaks_data/)')
 parser_import_leaks.add_argument('--no-ai', action='store_true',
                                   help='Skip AI format detection for unknown files')
+parser_import_leaks.add_argument('--force', action='store_true',
+                                  help='Re-parse files even if their SHA-256 is already in imported_files (default: skip)')
+
+parser_add_domain = cmd2.Cmd2ArgumentParser(description="Associate a domain with the selected company for infrastructure discovery.")
+parser_add_domain.add_argument('domain', help='Domain name to add (e.g. faradaysec.com)')
+
+parser_discover = cmd2.Cmd2ArgumentParser(description="Run infrastructure discovery (subdomain enumeration + DNS resolution) against all company domains using crt.sh and HackerTarget.")
+
+parser_lookup_profiles = cmd2.Cmd2ArgumentParser(description="Search for social media profiles of employees using Maigret, based on manually assigned usernames.")
+parser_lookup_profiles.add_argument('--employee', type=str, default=None,
+                                     help='Lookup a specific employee by name')
 
 class GroupConcat:
     def __init__(self):
@@ -458,8 +471,58 @@ class EmploLeaksCLI(cmd2.Cmd):
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS domains (
+                domain_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain TEXT NOT NULL,
+                company_id INTEGER,
+                FOREIGN KEY (company_id) REFERENCES companies(company_id),
+                UNIQUE(domain, company_id)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS subdomains (
+                subdomain_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subdomain TEXT NOT NULL,
+                domain_id INTEGER,
+                source TEXT,
+                ip_address TEXT,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (domain_id) REFERENCES domains(domain_id),
+                UNIQUE(subdomain, domain_id)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS usernames (
+                username_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                employee_id INTEGER,
+                source TEXT DEFAULT 'manual',
+                FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
+                UNIQUE(username, employee_id)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS imported_files (
+                file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_hash TEXT NOT NULL UNIQUE,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                rows_inserted INTEGER,
+                imported_at TEXT
+            )
+        """)
+
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_passwords_unique ON passwords(password, email_id, breach_context)")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_username_passwords_unique ON username_passwords(username, password, breach_context, company_id)")
+
+        try:
+            cur.execute("ALTER TABLE companies ADD COLUMN company_logo_url TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         for col, default in [('triage_status', "'pending'"), ('department', 'NULL'), ('excluded', '0')]:
             for table in ['passwords', 'username_passwords', 'secrets_repos', 'employees']:
@@ -473,6 +536,34 @@ class EmploLeaksCLI(cmd2.Cmd):
                     cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT {default}")
                 except sqlite3.OperationalError:
                     pass
+
+        # url column for credentials (separated from breach_context, which is the source label).
+        for table in ('passwords', 'username_passwords'):
+            try:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN url TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+        # One-time backfill: existing rows store the URL inside breach_context
+        # (e.g. "accounts.spotify.com"). Move domain-shaped values to `url` and
+        # replace breach_context with the source label "clickhouse-leaks".
+        # OR IGNORE: a row with the new (user, pass, 'clickhouse-leaks', company) key
+        # may already exist from a later import — skip the migration of the duplicate
+        # rather than abort startup.
+        for table in ('passwords', 'username_passwords'):
+            try:
+                cur.execute(f"""
+                    UPDATE OR IGNORE {table}
+                       SET url = breach_context,
+                           breach_context = 'clickhouse-leaks'
+                     WHERE url IS NULL
+                       AND breach_context IS NOT NULL
+                       AND breach_context != 'proxynova-comb'
+                       AND breach_context LIKE '%.%'
+                """)
+            except (sqlite3.OperationalError, sqlite3.IntegrityError):
+                pass
+        self.local_conn.commit()
 
         self.local_conn.commit()
         cur.close()
@@ -1711,6 +1802,54 @@ document.querySelectorAll('.data-table th').forEach(th => {{
                     csv_file.close()
                     log.info(f"Data exported to {export_filename}")
 
+        elif args.data == 'domains':
+            cur.execute("""
+                SELECT d.domain_id, d.domain,
+                       (SELECT COUNT(*) FROM subdomains s WHERE s.domain_id = d.domain_id) as sub_count
+                FROM domains d
+                WHERE d.company_id = ?
+                ORDER BY d.domain
+            """, (self.company_id,))
+            domains = cur.fetchall()
+            if not domains:
+                log.info("No domains registered. Use 'add_domain <domain>' to add one.")
+            else:
+                table = PrettyTable()
+                table.field_names = ["Domain", "Subdomains Found"]
+                for d in domains:
+                    table.add_row([d['domain'], d['sub_count']])
+                self.poutput(table)
+
+        elif args.data == 'subdomains':
+            cur.execute("""
+                SELECT s.subdomain, s.ip_address, s.source, s.first_seen, d.domain
+                FROM subdomains s
+                INNER JOIN domains d ON s.domain_id = d.domain_id
+                WHERE d.company_id = ?
+                ORDER BY d.domain, s.subdomain
+            """, (self.company_id,))
+            subs = cur.fetchall()
+            if not subs:
+                log.info("No subdomains found. Use 'discover' to run subdomain enumeration.")
+            else:
+                table = PrettyTable()
+                table.field_names = ["Subdomain", "IP Address", "Source", "First Seen", "Domain"]
+                table.max_width = 50
+                if args.export:
+                    import csv
+                    csv_writer = csv.writer(csv_file)
+                    csv_writer.writerow(["Subdomain", "IP Address", "Source", "First Seen", "Domain"])
+                for s in subs:
+                    row = [s['subdomain'], s['ip_address'] or '—', s['source'], s['first_seen'], s['domain']]
+                    table.add_row(row)
+                    if args.export:
+                        csv_writer.writerow(row)
+                self.poutput(table)
+                log.info(f"Total: {len(subs)} subdomains")
+                if args.export:
+                    csv_file.close()
+                    log.info(f"Data exported to {export_filename}")
+
         else:
             log.error("Invalid data type")
 
@@ -1954,21 +2093,44 @@ document.querySelectorAll('.data-table th').forEach(th => {{
                 if not company_info:
                     return
 
-                company_id, staff_count = company_info
+                linkedin_company_id = company_info[0]
+                staff_count = company_info[1]
+                company_logo_url = company_info[2] if len(company_info) > 2 else ''
+                company_id = linkedin_company_id
+
+                if company_logo_url:
+                    try:
+                        cur = self.local_conn.cursor()
+                        cur.execute("UPDATE companies SET company_logo_url = ? WHERE company_id = ?",
+                                    (company_logo_url, self.company_id))
+                        self.local_conn.commit()
+                        cur.close()
+                        log.info(f"Company logo captured from LinkedIn")
+                    except Exception as e:
+                        log.debug(f"Error saving company logo: {e}")
+                else:
+                    log.info("Company logo not found in LinkedIn response")
+
                 print(f"\n[+] Found {staff_count} employees at {company_name}")
 
                 profiles = self.plugin_instance.do_loops(company_id, company_domain, [''], 10, email_format)
                 if not profiles:
                     return
                     
-                spinner = Halo(text='Listing profiles:', spinner='dots')
-                spinner.start()
-                
+                def sanitize_text(text):
+                    """Strip RTL/LTR override characters that corrupt terminal ANSI sequences."""
+                    if not text:
+                        return text
+                    rtl_chars = '\u200f\u200e\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u061c'
+                    return ''.join(c for c in text if c not in rtl_chars)
+
                 try:
                     for i, profile in enumerate(profiles):
+                        name = sanitize_text(profile['full_name'])
+                        role = sanitize_text(profile['occupation'])
                         print(f"\n[{Fore.CYAN}Profile {i+1}{Style.RESET_ALL}]")
-                        print(f"  {Fore.GREEN}Name:{Style.RESET_ALL}    {profile['full_name']}")
-                        print(f"  {Fore.GREEN}Role:{Style.RESET_ALL}    {profile['occupation']}")
+                        print(f"  {Fore.GREEN}Name:{Style.RESET_ALL}    {name}")
+                        print(f"  {Fore.GREEN}Role:{Style.RESET_ALL}    {role}")
 
                         # First insert the employee (with search result photo if available)
                         cur = self.local_conn.cursor()
@@ -2078,9 +2240,10 @@ document.querySelectorAll('.data-table th').forEach(th => {{
                         print(f"\n[+] Profile processed successfully!")
 
                 except KeyboardInterrupt:
-                    spinner.stop()
+                    print(Style.RESET_ALL, end='', flush=True)
+                    raise
                 finally:
-                    spinner.stop()
+                    print(Style.RESET_ALL, end='', flush=True)
 
             elif cmd == 'impersonate':
                 log.info("Using cookies from the browser")
@@ -2445,7 +2608,34 @@ with this command again, pointing to a directory containing credential files.
                 self.company_name = ''
                 self.prompt = f"{Fore.RED}emploleaks{Style.RESET_ALL}> "
             
-            # Delete all associated data (using foreign key constraints)
+            # Delete subdomains via domains
+            cur.execute("DELETE FROM subdomains WHERE domain_id IN (SELECT domain_id FROM domains WHERE company_id = ?)", (company_id,))
+            cur.execute("DELETE FROM domains WHERE company_id = ?", (company_id,))
+
+            # Delete usernames and social_profiles via employees
+            cur.execute("DELETE FROM usernames WHERE employee_id IN (SELECT employee_id FROM employees WHERE company_id = ?)", (company_id,))
+            cur.execute("DELETE FROM social_profiles WHERE employee_id IN (SELECT employee_id FROM employees WHERE company_id = ?)", (company_id,))
+
+            # Delete secrets_repos
+            cur.execute("DELETE FROM secrets_repos WHERE company_id = ?", (company_id,))
+
+            # Delete tables that reference email_id
+            for table in ['breaches', 'passwords']:
+                cur.execute(f"""
+                    DELETE FROM {table} WHERE email_id IN (
+                        SELECT email_id FROM emails WHERE employee_id IN
+                        (SELECT employee_id FROM employees WHERE company_id = ?)
+                    )
+                """, (company_id,))
+
+            # Delete tables that reference employee_id directly
+            for table in ['githubs', 'twitters', 'phones', 'websites']:
+                cur.execute(f"DELETE FROM {table} WHERE employee_id IN (SELECT employee_id FROM employees WHERE company_id = ?)", (company_id,))
+
+            cur.execute("DELETE FROM emails WHERE employee_id IN (SELECT employee_id FROM employees WHERE company_id = ?)", (company_id,))
+            cur.execute("DELETE FROM potential_emails WHERE employee_id IN (SELECT employee_id FROM employees WHERE company_id = ?)", (company_id,))
+            cur.execute("DELETE FROM username_passwords WHERE company_id = ?", (company_id,))
+            cur.execute("DELETE FROM employees WHERE company_id = ?", (company_id,))
             cur.execute("DELETE FROM companies WHERE company_id = ?", (company_id,))
             self.local_conn.commit()
             
@@ -2593,14 +2783,36 @@ with this command again, pointing to a directory containing credential files.
         log.info(f"Found {len(files)} file(s) to process in {base_dir}")
         total_inserted = 0
         total_skipped = 0
+        total_already_imported = 0
         batch_size = 50000
-
-        spinner = Halo(text='Importing credentials...', spinner='dots')
-        spinner.start()
 
         for file_idx, fpath in enumerate(files, 1):
             fname = os.path.basename(fpath)
-            spinner.text = f'Processing file {file_idx}/{len(files)}: {fname}'
+
+            try:
+                file_hash = self._sha256_file(fpath)
+                file_size = os.path.getsize(fpath)
+            except OSError as e:
+                log.error(f"[{file_idx}/{len(files)}] Cannot hash {fname}: {e}")
+                total_skipped += 1
+                continue
+
+            if not args.force:
+                cur = self.local_conn.cursor()
+                cur.execute(
+                    "SELECT rows_inserted, imported_at FROM imported_files WHERE file_hash = ?",
+                    (file_hash,),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    log.info(
+                        f"[{file_idx}/{len(files)}] [skip] {fname} already imported "
+                        f"({existing['rows_inserted']:,} rows on {existing['imported_at']}, "
+                        f"hash {file_hash[:12]}). Use --force to re-parse."
+                    )
+                    total_already_imported += 1
+                    continue
+
             log.info(f"[{file_idx}/{len(files)}] Parsing: {fname}")
 
             batch = []
@@ -2611,7 +2823,6 @@ with this command again, pointing to a directory containing credential files.
                     if len(batch) >= batch_size:
                         self._insert_credentials_batch(batch)
                         file_count += len(batch)
-                        spinner.text = f'File {file_idx}/{len(files)}: {fname} — {file_count:,} rows...'
                         batch = []
 
                 if batch:
@@ -2624,23 +2835,53 @@ with this command again, pointing to a directory containing credential files.
                 else:
                     total_skipped += 1
 
+                cur = self.local_conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO imported_files "
+                    "(file_hash, file_path, file_size, rows_inserted, imported_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        file_hash,
+                        fpath,
+                        file_size,
+                        file_count,
+                        datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                    ),
+                )
+                self.local_conn.commit()
+
             except Exception as e:
                 log.error(f"  Error processing {fname}: {e}")
                 total_skipped += 1
 
-        spinner.stop()
+        summary_tail = (
+            f"({total_already_imported} already-imported skipped, "
+            f"{total_skipped} failed/empty)"
+        )
 
         if total_inserted > 0:
             log.info("Deduplicating credentials...")
             try:
                 self.leaks_conn.execute('OPTIMIZE TABLE credentials FINAL')
                 final_count = self.leaks_conn.execute('SELECT count() FROM credentials')[0][0]
-                log.info(f"Import complete: {total_inserted:,} rows processed, {final_count:,} unique credentials in database")
+                log.info(
+                    f"Import complete: {total_inserted:,} rows processed, "
+                    f"{final_count:,} unique credentials in database {summary_tail}"
+                )
             except Exception as e:
                 log.warning(f"Deduplication pending (background): {e}")
-                log.info(f"Import complete: {total_inserted:,} credentials inserted, {total_skipped} files skipped")
+                log.info(f"Import complete: {total_inserted:,} credentials inserted {summary_tail}")
         else:
-            log.info(f"Import complete: no new credentials found, {total_skipped} files skipped")
+            log.info(f"Import complete: no new credentials found {summary_tail}")
+
+    @staticmethod
+    def _sha256_file(path, chunk_size=1 << 20):
+        """Streaming SHA-256 of a file. Used to dedup imports by content."""
+        h = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(chunk_size), b''):
+                h.update(chunk)
+        return h.hexdigest()
 
     def _insert_credentials_batch(self, batch):
         """Insert a batch of credential tuples into ClickHouse."""
@@ -2822,71 +3063,265 @@ with this command again, pointing to a directory containing credential files.
         cur.close()
         log.info(f"Lookup complete. Found {total_found} platform registrations.")
 
-    @cmd2.with_argparser(parser_findpasswords)
-    @leaksdb_connected
+    @cmd2.with_argparser(parser_add_domain)
     @company_selected
-    def do_find_passwords(self, args):
-        """Search for leaked credentials in ClickHouse database using emails and usernames from local database."""
-        if not self.leaks_conn:
-            log.warning("No connection to leaks database. Use 'connect_leaks' first.")
+    def do_add_domain(self, args):
+        """Associate a domain with the selected company for infrastructure discovery.
+
+        Examples:
+            add_domain faradaysec.com
+            add_domain example.org
+        """
+        domain = args.domain.strip().lower()
+        cur = self.local_conn.cursor()
+        try:
+            cur.execute("INSERT INTO domains (domain, company_id) VALUES (?, ?)",
+                        (domain, self.company_id))
+            self.local_conn.commit()
+            log.info(f"Domain '{domain}' added to company.")
+        except sqlite3.IntegrityError:
+            log.warning(f"Domain '{domain}' is already registered for this company.")
+        cur.close()
+
+    @cmd2.with_argparser(parser_discover)
+    @company_selected
+    def do_discover(self, args):
+        """Run infrastructure discovery (subdomain enumeration) against all company domains.
+
+        Uses `assetfinder` as the primary source. If a SecurityTrails API key is
+        configured under [discovery] in tokens.ini, queries it as well and merges
+        results. Resolves DNS for every subdomain found.
+
+        Examples:
+            discover
+        """
+        from utils.discovery import discover_all
+
+        cur = self.local_conn.cursor()
+        cur.execute("SELECT domain_id, domain FROM domains WHERE company_id = ?", (self.company_id,))
+        domains = cur.fetchall()
+
+        if not domains:
+            log.warning("No domains registered. Use 'add_domain <domain>' first.")
+            cur.close()
             return
 
-        # Clean any quoted emails before starting the search
+        st_key = None
+        try:
+            cfg = configparser.RawConfigParser()
+            cfg.read(self.configfilepath)
+            if cfg.has_option('discovery', 'securitytrails_key'):
+                key = cfg.get('discovery', 'securitytrails_key').strip()
+                if key and not key.startswith('your_'):
+                    st_key = key
+        except Exception:
+            pass
+        if st_key:
+            log.info("SecurityTrails API key detected; will query SecurityTrails in addition to assetfinder.")
+
+        total_new = 0
+        for domain_row in domains:
+            domain_id = domain_row['domain_id']
+            domain = domain_row['domain']
+            log.info(f"Running discovery for {domain}...")
+
+            results = discover_all(
+                domain,
+                securitytrails_api_key=st_key,
+                progress_callback=lambda msg: log.info(f"  {msg}"),
+            )
+
+            for entry in results:
+                try:
+                    cur.execute("""
+                        INSERT INTO subdomains (subdomain, domain_id, source, ip_address)
+                        VALUES (?, ?, ?, ?)
+                    """, (entry['subdomain'], domain_id, entry['source'], entry['ip']))
+                    total_new += 1
+                except sqlite3.IntegrityError:
+                    cur.execute("""
+                        UPDATE subdomains SET ip_address = ?, source = ?
+                        WHERE subdomain = ? AND domain_id = ?
+                    """, (entry['ip'], entry['source'], entry['subdomain'], domain_id))
+
+            self.local_conn.commit()
+            log.info(f"Domain {domain}: found {len(results)} subdomains")
+        cur.close()
+        log.info(f"Discovery complete. {total_new} new subdomains added. Use 'print --data subdomains' to view.")
+
+    @cmd2.with_argparser(parser_lookup_profiles)
+    @company_selected
+    def do_lookup_profiles(self, args):
+        """Search for social media profiles using Maigret, based on employee usernames.
+
+        Usernames must be manually added via the webapp. This command runs Maigret
+        against all registered usernames and saves found profiles to the database.
+
+        Examples:
+            lookup_profiles                    Lookup all employees with usernames
+            lookup_profiles --employee "John"  Lookup a specific employee
+        """
+        from utils.profile_lookup import lookup_username_sync
+
+        cur = self.local_conn.cursor()
+
+        query = """
+            SELECT u.username_id, u.username, u.employee_id, e.name
+            FROM usernames u
+            INNER JOIN employees e ON u.employee_id = e.employee_id
+            WHERE e.company_id = ?
+        """
+        params = [self.company_id]
+
+        if args.employee:
+            query += " AND e.name LIKE ?"
+            params.append(f"%{args.employee}%")
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        if not rows:
+            log.info("No usernames found. Add usernames via the webapp first.")
+            cur.close()
+            return
+
+        config = configparser.RawConfigParser()
+        config.read(self.configfilepath)
+        platforms = None
+        if config.has_section('maigret') and config.has_option('maigret', 'platforms'):
+            raw = config.get('maigret', 'platforms')
+            platforms = [p.strip() for p in raw.split(',') if p.strip()]
+
+        total_found = 0
+        for idx, row in enumerate(rows, 1):
+            username = row['username']
+            employee_id = row['employee_id']
+            name = row['name']
+            log.info(f"[{idx}/{len(rows)}] Checking @{username} ({name})...")
+
+            results = lookup_username_sync(username, platforms)
+
+            for r in results:
+                if not r.get('exists'):
+                    continue
+                try:
+                    cur.execute("""
+                        INSERT INTO social_profiles (platform, url, exists_flag, employee_id)
+                        VALUES (?, ?, 1, ?)
+                    """, (r['platform'], r.get('url'), employee_id))
+                    total_found += 1
+                except sqlite3.IntegrityError:
+                    pass
+
+                log.info(f"  [+] {r['platform']}: {r.get('url', 'found')}")
+
+        self.local_conn.commit()
+        cur.close()
+        log.info(f"Profile lookup complete. Found {total_found} new profiles.")
+
+    @cmd2.with_argparser(parser_findpasswords)
+    @company_selected
+    def do_find_passwords(self, args):
+        """Search for leaked credentials in ClickHouse and/or ProxyNova COMB API."""
+        use_clickhouse = not getattr(args, 'no_clickhouse', False) and self.leaks_conn
+        use_proxynova = not getattr(args, 'no_proxynova', False)
+
+        if not use_clickhouse and not use_proxynova:
+            log.warning("Both ClickHouse and ProxyNova are disabled. Nothing to search.")
+            return
+        if not use_clickhouse and not args.no_clickhouse:
+            log.info("ClickHouse not connected — searching ProxyNova COMB only.")
+
         self._clean_quoted_emails()
 
         cur = self.local_conn.cursor()
-        
-        def search_by_username(username):
-            """Search for credentials using only the username."""
-            if not username:
-                return
+        proxynova_count = 0
 
+        def search_proxynova(query_str, email_id=None, username_only=False):
+            """Search ProxyNova COMB API and save results.
+            When searching by email, only keeps results matching the exact email.
+            When searching by username, keeps all results."""
+            nonlocal proxynova_count
+            import requests as req
+            try:
+                resp = req.get(
+                    'https://api.proxynova.com/comb',
+                    params={'query': query_str, 'start': 0, 'limit': 100},
+                    timeout=15
+                )
+                if resp.status_code != 200:
+                    return
+                data = resp.json()
+                lines = data.get('lines', [])
+                if not lines:
+                    return
+
+                query_lower = query_str.lower().strip()
+                saved = 0
+                for line in lines:
+                    parts = line.split(':', 1)
+                    if len(parts) != 2:
+                        continue
+                    found_identity, password = parts[0].strip(), parts[1].strip()
+                    if not password:
+                        continue
+
+                    if not username_only and '@' in query_str:
+                        if found_identity.lower().strip() != query_lower:
+                            continue
+
+                    try:
+                        if username_only or email_id is None:
+                            cur.execute("INSERT OR IGNORE INTO username_passwords (username, password, breach_context, url, company_id) VALUES (?, ?, ?, ?, ?)",
+                                        (query_str, password, 'proxynova-comb', None, self.company_id))
+                        else:
+                            cur.execute("INSERT OR IGNORE INTO passwords (password, email_id, breach_context, url) VALUES (?, ?, ?, ?)",
+                                        (password, email_id, 'proxynova-comb', None))
+                        self.local_conn.commit()
+                        saved += 1
+                        proxynova_count += 1
+                    except sqlite3.Error:
+                        self.local_conn.rollback()
+
+                if saved > 0:
+                    log.info(f"ProxyNova COMB: {saved} credentials for '{query_str}' (filtered from {len(lines)} results)")
+            except Exception as e:
+                log.debug(f"ProxyNova error for '{query_str}': {e}")
+
+        def search_by_username_ch(username):
+            if not username or not use_clickhouse:
+                return
             log.info(f"Searching credentials for username: {username}")
             try:
-                # Query ClickHouse for credentials using only username
                 query = """
                     SELECT DISTINCT password, uri_subdomain, uri_domain, uri_tld 
                     FROM credentials FINAL
                     WHERE mail_username = %(username)s
                 """
-                params = {'username': username}
-                
-                results = self.leaks_conn.execute(query, params, settings={'log_queries': 0})
-                
+                results = self.leaks_conn.execute(query, {'username': username}, settings={'log_queries': 0})
                 if not results:
                     return
-
                 log.info(f"Found {len(results)} credentials for username: {username}")
-                # Save found credentials to local database
                 for password, uri_subdomain, uri_domain, uri_tld in results:
                     try:
-                        # Store the password with additional context in username_passwords table
-                        context = f"{uri_subdomain}.{uri_domain}.{uri_tld}" if uri_subdomain else f"{uri_domain}.{uri_tld}"
-                        sql = """
-                            INSERT OR IGNORE INTO username_passwords (username, password, breach_context, company_id)
-                            VALUES (?, ?, ?, ?)
-                        """
-                        cur.execute(sql, (username, password, context, self.company_id))
+                        url = (f"{uri_subdomain}.{uri_domain}.{uri_tld}" if uri_subdomain
+                               else (f"{uri_domain}.{uri_tld}" if uri_domain else None))
+                        cur.execute("INSERT OR IGNORE INTO username_passwords (username, password, breach_context, url, company_id) VALUES (?, ?, ?, ?, ?)",
+                                    (username, password, 'clickhouse-leaks', url, self.company_id))
                         self.local_conn.commit()
-                    except sqlite3.IntegrityError:
-                        # Skip duplicates
+                    except sqlite3.Error:
                         self.local_conn.rollback()
-                    except sqlite3.Error as e:
-                        log.error(f"Database error while saving password: {str(e)}")
-                        self.local_conn.rollback()
-
             except Exception as e:
                 log.error(f"Error searching credentials for username {username}: {str(e)}")
 
-        def search_by_email(email_id, email):
-            """Search for credentials using full email address."""
+        def search_by_email_ch(email_id, email):
+            if not use_clickhouse:
+                return
             username, domain, tld = parse_email(email)
             if not all([username, domain, tld]):
                 return
-
             log.info(f"Searching credentials for: {email}")
             try:
-                # Query ClickHouse for credentials
                 query = """
                     SELECT password, uri_subdomain, uri_domain, uri_tld 
                     FROM credentials FINAL
@@ -2894,41 +3329,23 @@ with this command again, pointing to a directory containing credential files.
                     AND mail_domain = %(domain)s 
                     AND mail_tld = %(tld)s
                 """
-                params = {
-                    'username': username,
-                    'domain': domain,
-                    'tld': tld
-                }
-                
-                results = self.leaks_conn.execute(query, params, settings={'log_queries': 0})
-                
+                results = self.leaks_conn.execute(query, {'username': username, 'domain': domain, 'tld': tld}, settings={'log_queries': 0})
                 if not results:
                     return
-
                 log.info(f"Found {len(results)} credentials for: {email}")
-                # Save found credentials to local database
                 for password, uri_subdomain, uri_domain, uri_tld in results:
                     try:
-                        # Store the password with additional context
-                        context = f"{uri_subdomain}.{uri_domain}.{uri_tld}" if uri_subdomain else f"{uri_domain}.{uri_tld}"
-                        sql = """
-                            INSERT OR IGNORE INTO passwords (password, email_id, breach_context)
-                            VALUES (?, ?, ?)
-                        """
-                        cur.execute(sql, (password, email_id, context))
+                        url = (f"{uri_subdomain}.{uri_domain}.{uri_tld}" if uri_subdomain
+                               else (f"{uri_domain}.{uri_tld}" if uri_domain else None))
+                        cur.execute("INSERT OR IGNORE INTO passwords (password, email_id, breach_context, url) VALUES (?, ?, ?, ?)",
+                                    (password, email_id, 'clickhouse-leaks', url))
                         self.local_conn.commit()
-                    except sqlite3.IntegrityError:
-                        # Skip duplicates
+                    except sqlite3.Error:
                         self.local_conn.rollback()
-                    except sqlite3.Error as e:
-                        log.error(f"Database error while saving password: {str(e)}")
-                        self.local_conn.rollback()
-
             except Exception as e:
                 log.error(f"Error searching credentials for {email}: {str(e)}")
 
         def parse_email(email):
-            """Parse email into username, domain, and tld components."""
             try:
                 username, domain = email.split('@')
                 domain_parts = domain.split('.')
@@ -2939,20 +3356,14 @@ with this command again, pointing to a directory containing credential files.
                 log.error(f"Error parsing email {email}: {str(e)}")
                 return None, None, None
 
-        # First, ensure we have the breach_context column in passwords table
         try:
             cur.execute("ALTER TABLE passwords ADD COLUMN breach_context TEXT")
             self.local_conn.commit()
         except sqlite3.OperationalError:
-            # Column might already exist
             pass
 
-        spinner = Halo(text='Searching for leaked credentials...', spinner='dots')
-        spinner.start()
-
-        # Get all usernames if needed
+        log.info("Searching for leaked credentials...")
         if args.mode in ['find_all', 'only_usernames']:
-            # 1. Get usernames from potential_emails
             cur.execute("""
                 SELECT DISTINCT SUBSTR(email, 1, INSTR(email, '@') - 1) as username
                 FROM potential_emails pe
@@ -2961,7 +3372,6 @@ with this command again, pointing to a directory containing credential files.
             """, (self.company_id,))
             potential_usernames = [row['username'] for row in cur.fetchall()]
 
-            # 2. Get usernames from confirmed emails
             cur.execute("""
                 SELECT DISTINCT SUBSTR(email, 1, INSTR(email, '@') - 1) as username
                 FROM emails e
@@ -2970,7 +3380,6 @@ with this command again, pointing to a directory containing credential files.
             """, (self.company_id,))
             confirmed_usernames = [row['username'] for row in cur.fetchall()]
 
-            # 3. Get usernames from Twitter URLs
             cur.execute("""
                 SELECT DISTINCT SUBSTR(twitter_url, INSTR(twitter_url, 'x.com/') + 6) as username
                 FROM twitters t
@@ -2979,53 +3388,54 @@ with this command again, pointing to a directory containing credential files.
             """, (self.company_id,))
             twitter_usernames = [row['username'] for row in cur.fetchall()]
 
-            # Combine all unique usernames
             all_usernames = set(potential_usernames + confirmed_usernames + twitter_usernames)
-            
-            # Search for credentials using each username
-            for username in all_usernames:
-                search_by_username(username)
 
-        # Get and process emails if needed
+            for username in all_usernames:
+                search_by_username_ch(username)
+                if use_proxynova:
+                    search_proxynova(username, username_only=True)
+
         if args.mode in ['find_all', 'only_emails']:
-            # Get confirmed emails
             cur.execute("""
-                SELECT email_id, email 
-                FROM employees 
-                INNER JOIN emails ON emails.employee_id = employees.employee_id 
+                SELECT email_id, email
+                FROM employees
+                INNER JOIN emails ON emails.employee_id = employees.employee_id
                 WHERE company_id = ?
             """, (self.company_id,))
             ids_and_emails = cur.fetchall()
 
-            # Get potential emails
             cur.execute("""
-                SELECT email_id, email 
-                FROM employees 
-                INNER JOIN potential_emails ON potential_emails.employee_id = employees.employee_id 
+                SELECT email_id, email
+                FROM employees
+                INNER JOIN potential_emails ON potential_emails.employee_id = employees.employee_id
                 WHERE company_id = ?
             """, (self.company_id,))
             potential_ids_and_emails = cur.fetchall()
 
             if len(ids_and_emails) == 0 and len(potential_ids_and_emails) == 0:
                 log.info("There are no emails for this company yet, please find some first.")
+                cur.close()
                 return
 
-            # Process confirmed emails
             for row in ids_and_emails:
-                email_id = row['email_id']
-                email = row['email']
-                search_by_email(email_id, email)
+                email_id, email = row['email_id'], row['email']
+                search_by_email_ch(email_id, email)
+                if use_proxynova:
+                    search_proxynova(email, email_id=email_id)
 
-            # Process potential emails
             for row in potential_ids_and_emails:
-                email_id = row['email_id']
-                email = row['email']
-                search_by_email(email_id, email)
-
-        spinner.stop()
+                email_id, email = row['email_id'], row['email']
+                search_by_email_ch(email_id, email)
+                if use_proxynova:
+                    search_proxynova(email, email_id=email_id)
         cur.close()
 
-        log.info("Credential search completed. Use 'print --data passwords' to view results.")
+        sources = []
+        if use_clickhouse:
+            sources.append("ClickHouse")
+        if use_proxynova:
+            sources.append(f"ProxyNova COMB ({proxynova_count} hits)")
+        log.info(f"Credential search completed [{', '.join(sources)}]. Use 'print --data passwords' to view results.")
 
     def _clean_quoted_emails(self):
         """Clean any emails that might have quotes in them."""
@@ -3095,25 +3505,27 @@ def _launch_webapp(debug=False):
 
     print(f"""
 {Fore.RED}emploleaks{Style.RESET_ALL} {Fore.CYAN}webapp{Style.RESET_ALL}
-    
-  Backend  → http://localhost:8000  (FastAPI)
-  Frontend → http://localhost:3000  (Next.js)
-  API Docs → http://localhost:8000/docs
+
+  Backend  → http://localhost:8421  (FastAPI)
+  Frontend → http://localhost:3421  (Next.js)
+  API Docs → http://localhost:8421/docs
 
   Press Ctrl+C to stop both servers.
 """)
 
-    uvicorn_cmd = [venv_python, '-m', 'uvicorn', 'main:app', '--port', '8000', '--host', '0.0.0.0']
+    uvicorn_cmd = [venv_python, '-m', 'uvicorn', 'main:app', '--port', '8421', '--host', '127.0.0.1']
     if debug:
         uvicorn_cmd.append('--reload')
     backend_proc = subprocess.Popen(uvicorn_cmd, cwd=backend_dir)
     procs.append(backend_proc)
 
-    frontend_proc = subprocess.Popen(['npm', 'run', 'dev'], cwd=frontend_dir)
+    frontend_proc = subprocess.Popen(
+        ['npm', 'run', 'dev', '--', '--port', '3421'], cwd=frontend_dir
+    )
     procs.append(frontend_proc)
 
     time.sleep(3)
-    webbrowser.open('http://localhost:3000')
+    webbrowser.open('http://localhost:3421')
 
     try:
         backend_proc.wait()

@@ -9,7 +9,7 @@ router = APIRouter(tags=["credentials"])
 async def list_credentials(company_id: int = Query(...)):
     async with get_db() as db:
         email_creds = await db.execute_fetchall("""
-            SELECT p.password_id, p.password, p.breach_context, p.triage_status,
+            SELECT p.password_id, p.password, p.breach_context, p.triage_status, p.url,
                    COALESCE(em.email, pe.email) as email,
                    COALESCE(emp1.name, emp2.name) as employee_name
             FROM passwords p
@@ -22,7 +22,7 @@ async def list_credentials(company_id: int = Query(...)):
         """, (company_id, company_id))
 
         username_creds = await db.execute_fetchall("""
-            SELECT password_id, username, password, breach_context, triage_status
+            SELECT password_id, username, password, breach_context, triage_status, url
             FROM username_passwords
             WHERE company_id = ?
             ORDER BY username
@@ -33,11 +33,12 @@ async def list_credentials(company_id: int = Query(...)):
             results.append({
                 "password_id": r[0],
                 "source_type": "email",
-                "identifier": r[4] or "",
+                "identifier": r[5] or "",
                 "password": r[1] or "",
+                "url": r[4],
                 "breach_context": r[2],
                 "triage_status": r[3] or "pending",
-                "employee_name": r[5],
+                "employee_name": r[6],
             })
         for r in username_creds:
             results.append({
@@ -45,11 +46,36 @@ async def list_credentials(company_id: int = Query(...)):
                 "source_type": "username",
                 "identifier": r[1] or "",
                 "password": r[2] or "",
+                "url": r[5],
                 "breach_context": r[3],
                 "triage_status": r[4] or "pending",
                 "employee_name": None,
             })
         return results
+
+
+@router.get("/employees/{employee_id}/credentials", response_model=list[CredentialOut])
+async def list_credentials_for_employee(employee_id: int):
+    async with get_db() as db:
+        rows = await db.execute_fetchall("""
+            SELECT p.password_id, p.password, p.breach_context, p.triage_status, p.url,
+                   COALESCE(em.email, pe.email) as email
+            FROM passwords p
+            LEFT JOIN emails em ON p.email_id = em.email_id
+            LEFT JOIN potential_emails pe ON p.email_id = pe.email_id
+            WHERE em.employee_id = ? OR pe.employee_id = ?
+            ORDER BY email
+        """, (employee_id, employee_id))
+        return [{
+            "password_id": r[0],
+            "source_type": "email",
+            "identifier": r[5] or "",
+            "password": r[1] or "",
+            "url": r[4],
+            "breach_context": r[2],
+            "triage_status": r[3] or "pending",
+            "employee_name": None,
+        } for r in rows]
 
 
 @router.patch("/credentials/bulk-triage")

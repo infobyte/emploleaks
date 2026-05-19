@@ -45,9 +45,15 @@ Thumbs.db
 *.log
 *.csv
 *.html
+*.mov
+*.mp4
+*.mkv
+*.webm
 data/
 logs/
 config/tokens.ini
+config/*.session
+config/*.session-journal
 !config/.gitkeep
 !logs/.gitkeep
 !data/.gitkeep

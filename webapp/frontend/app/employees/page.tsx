@@ -13,9 +13,11 @@ import {
   DragStartEvent,
   DragEndEvent,
 } from "@dnd-kit/core";
-import DeptColumn from "@/components/DeptColumn";
+import DeptSection from "@/components/DeptSection";
 import EmployeeCard from "@/components/EmployeeCard";
-import { Search, Plus, Sparkles, RefreshCw, Globe } from "lucide-react";
+import { Search, Plus, Sparkles, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+
+const UNASSIGNED = "Unassigned";
 
 export default function EmployeesPage() {
   const companyId = useCompanyId();
@@ -26,7 +28,8 @@ export default function EmployeesPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [newDept, setNewDept] = useState("");
   const [classifying, setClassifying] = useState(false);
-  const [lookingUp, setLookingUp] = useState(false);
+  const [allExpanded, setAllExpanded] = useState(true);
+  const [expandKey, setExpandKey] = useState(0);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -50,13 +53,12 @@ export default function EmployeesPage() {
   }, [employees]);
 
   const hasDepts = departments.length > 0;
-  const UNASSIGNED = "Unassigned";
 
   const grouped = useMemo(() => {
     const map: Record<string, Employee[]> = {};
     if (hasDepts) {
-      map[UNASSIGNED] = [];
       departments.forEach((d) => (map[d] = []));
+      map[UNASSIGNED] = [];
     }
     const lower = search.toLowerCase();
     employees.forEach((e) => {
@@ -98,6 +100,15 @@ export default function EmployeesPage() {
         );
       } catch { /* ignore */ }
     }
+  };
+
+  const handleChangeDept = async (empId: number, dept: string) => {
+    try {
+      await api.updateEmployee(empId, { department: dept });
+      setEmployees((prev) =>
+        prev.map((e) => e.employee_id === empId ? { ...e, department: dept || null } : e)
+      );
+    } catch { /* ignore */ }
   };
 
   const handleExclude = async (id: number) => {
@@ -145,21 +156,15 @@ export default function EmployeesPage() {
     }
   };
 
-  const handleLookup = async () => {
-    if (!companyId) return;
-    setLookingUp(true);
-    try {
-      const result = await api.lookupSocialProfiles(companyId);
-      load();
-      alert(`Found ${result.found} social profiles across ${result.emails_checked} emails`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Lookup failed");
-    } finally {
-      setLookingUp(false);
-    }
+  const toggleAll = () => {
+    setAllExpanded(!allExpanded);
+    setExpandKey((k) => k + 1);
   };
 
   const activeEmployee = activeId ? employees.find((e) => e.employee_id === activeId) : null;
+
+  const visibleSections = Object.entries(grouped).filter(([, emps]) => !search || emps.length > 0);
+  const totalFiltered = visibleSections.reduce((sum, [, emps]) => sum + emps.length, 0);
 
   if (loading) {
     return (
@@ -184,25 +189,17 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="max-w-full mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Employees</h1>
           <p className="text-sm text-text-secondary mt-0.5">
-            {employees.length} total{hasDepts ? " · Drag between departments" : ""}
+            {employees.length} total
+            {hasDepts ? ` · ${departments.length} department${departments.length !== 1 ? "s" : ""}` : ""}
+            {search && hasDepts ? ` · ${totalFiltered} matching` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {employees.length > 0 && (
-            <button
-              onClick={handleLookup}
-              disabled={lookingUp}
-              className="inline-flex items-center gap-1.5 bg-bg-secondary border border-border text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-bg-hover transition-colors disabled:opacity-50"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              {lookingUp ? "Looking up..." : "Lookup Social"}
-            </button>
-          )}
           {!hasDepts && employees.length > 0 && (
             <button
               onClick={handleClassify}
@@ -217,7 +214,7 @@ export default function EmployeesPage() {
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
           <input
             type="text"
@@ -244,17 +241,41 @@ export default function EmployeesPage() {
             Add
           </button>
         </div>
+        {hasDepts && (
+          <button
+            onClick={toggleAll}
+            className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+            title={allExpanded ? "Collapse all" : "Expand all"}
+          >
+            {allExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {allExpanded ? "Collapse" : "Expand"}
+          </button>
+        )}
       </div>
 
       {hasDepts ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="flex gap-3 overflow-x-auto pb-4">
-            {Object.entries(grouped).map(([dept, emps]) => (
-              <DeptColumn key={dept} department={dept} employees={emps} onExclude={handleExclude} onDelete={handleDelete} />
+          <div className="space-y-3">
+            {visibleSections.map(([dept, emps]) => (
+              <DeptSection
+                key={`${dept}-${expandKey}`}
+                department={dept}
+                employees={emps}
+                allDepartments={departments}
+                onExclude={handleExclude}
+                onDelete={handleDelete}
+                onChangeDept={handleChangeDept}
+                defaultExpanded={allExpanded}
+              />
             ))}
           </div>
           <DragOverlay>
-            {activeEmployee && <EmployeeCard employee={activeEmployee} compact />}
+            {activeEmployee && (
+              <div className="bg-bg-secondary border border-accent rounded-lg px-3 py-2 shadow-lg max-w-xs">
+                <p className="text-sm font-medium text-text-primary truncate">{activeEmployee.name}</p>
+                {activeEmployee.title && <p className="text-xs text-text-secondary truncate">{activeEmployee.title}</p>}
+              </div>
+            )}
           </DragOverlay>
         </DndContext>
       ) : (

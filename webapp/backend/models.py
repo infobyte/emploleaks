@@ -5,6 +5,7 @@ from typing import Optional
 class CompanyOut(BaseModel):
     company_id: int
     company_name: str
+    company_logo_url: Optional[str] = None
 
 
 class CompanyCreate(BaseModel):
@@ -71,6 +72,7 @@ class CredentialOut(BaseModel):
     source_type: str  # "email" or "username"
     identifier: str
     password: str
+    url: Optional[str] = None
     breach_context: Optional[str] = None
     triage_status: str = "pending"
     employee_name: Optional[str] = None
@@ -123,3 +125,35 @@ class SocialProfileOut(BaseModel):
     employee_id: int
     employee_name: Optional[str] = None
     source_email: Optional[str] = None
+
+
+class DomainOut(BaseModel):
+    domain_id: int
+    domain: str
+    subdomain_count: int = 0
+
+
+class DomainCreate(BaseModel):
+    domain: str
+    company_id: int
+
+
+class SubdomainOut(BaseModel):
+    subdomain_id: int
+    subdomain: str
+    ip_address: Optional[str] = None
+    source: Optional[str] = None
+    first_seen: Optional[str] = None
+    domain: Optional[str] = None
+
+
+class UsernameOut(BaseModel):
+    username_id: int
+    username: str
+    employee_id: int
+    employee_name: Optional[str] = None
+    source: str = "manual"
+
+
+class UsernameCreate(BaseModel):
+    username: str

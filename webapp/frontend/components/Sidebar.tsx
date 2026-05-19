@@ -10,6 +10,8 @@ import {
   KeyRound,
   ShieldAlert,
   AlertTriangle,
+  Globe,
+  Radar,
   ChevronDown,
   Search,
   Building2,
@@ -18,6 +20,8 @@ import {
 const NAV = [
   { href: "/", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/employees", label: "Employees", Icon: Users },
+  { href: "/social", label: "Connected Accounts", Icon: Globe },
+  { href: "/discovery", label: "Discovery", Icon: Radar },
   { href: "/credentials", label: "Credentials", Icon: KeyRound },
   { href: "/secrets", label: "Secrets", Icon: ShieldAlert },
   { href: "/breaches", label: "Breaches", Icon: AlertTriangle },
@@ -57,7 +61,11 @@ export default function Sidebar({
             onClick={() => setOpen(!open)}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-tertiary border border-border text-sm text-text-primary hover:border-border-light transition-colors"
           >
-            <Building2 className="w-4 h-4 text-text-secondary shrink-0" />
+            {selected?.company_logo_url ? (
+              <img src={selected.company_logo_url} alt="" className="w-5 h-5 rounded object-contain shrink-0" />
+            ) : (
+              <Building2 className="w-4 h-4 text-text-secondary shrink-0" />
+            )}
             <span className="flex-1 text-left truncate">
               {selected ? selected.company_name : "Select company"}
             </span>
@@ -69,10 +77,15 @@ export default function Sidebar({
                 <button
                   key={c.company_id}
                   onClick={() => { onCompanyChange(c.company_id); setOpen(false); }}
-                  className={`w-full text-left px-3 py-2 text-sm hover:bg-bg-hover transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                  className={`w-full flex items-center gap-2 text-left px-3 py-2 text-sm hover:bg-bg-hover transition-colors first:rounded-t-lg last:rounded-b-lg ${
                     c.company_id === companyId ? "text-accent bg-accent/5" : "text-text-primary"
                   }`}
                 >
+                  {c.company_logo_url ? (
+                    <img src={c.company_logo_url} alt="" className="w-4 h-4 rounded object-contain shrink-0" />
+                  ) : (
+                    <Building2 className="w-3.5 h-3.5 text-text-secondary shrink-0" />
+                  )}
                   {c.company_name}
                 </button>
               ))}

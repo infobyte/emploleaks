@@ -50,6 +50,15 @@ export default function CredentialsPage() {
   const emailCount = creds.filter((c) => c.source_type === "email").length;
   const usernameCount = creds.filter((c) => c.source_type === "username").length;
 
+  const renderUrl = (row: Credential) =>
+    row.url ? (
+      <span className="text-xs text-text-secondary font-mono truncate max-w-[260px] inline-block" title={row.url}>
+        {row.url}
+      </span>
+    ) : (
+      <span className="text-xs text-text-tertiary">—</span>
+    );
+
   const columns =
     tab === "email"
       ? [
@@ -61,6 +70,7 @@ export default function CredentialsPage() {
               <code className="text-xs bg-bg-tertiary px-2 py-0.5 rounded font-mono">{row.password}</code>
             ),
           },
+          { key: "url", label: "URL", render: renderUrl },
           { key: "breach_context", label: "Source" },
           {
             key: "triage_status", label: "Status",
@@ -82,6 +92,7 @@ export default function CredentialsPage() {
               <code className="text-xs bg-bg-tertiary px-2 py-0.5 rounded font-mono">{row.password}</code>
             ),
           },
+          { key: "url", label: "URL", render: renderUrl },
           { key: "breach_context", label: "Source" },
           {
             key: "triage_status", label: "Status",
@@ -164,7 +175,7 @@ export default function CredentialsPage() {
         columns={columns}
         data={filtered}
         keyField="password_id"
-        searchKeys={["identifier", "password", "employee_name", "breach_context"]}
+        searchKeys={["identifier", "password", "employee_name", "breach_context", "url"]}
         emptyMessage="No credentials found"
         selectable
         selectedIds={selected}

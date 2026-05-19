@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useCompanyId } from "./layout";
-import { api, DashboardData, SocialProfile } from "@/lib/api";
+import { api, Company, DashboardData, SocialProfile } from "@/lib/api";
 import StatsCard from "@/components/StatsCard";
 import {
   Users,
@@ -13,6 +13,7 @@ import {
   UserCheck,
   Globe,
   ArrowRight,
+  Building2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const companyId = useCompanyId();
   const [data, setData] = useState<DashboardData | null>(null);
   const [socialProfiles, setSocialProfiles] = useState<SocialProfile[]>([]);
+  const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,10 +30,12 @@ export default function DashboardPage() {
     Promise.all([
       api.getDashboard(companyId),
       api.getSocialProfiles(companyId).catch(() => []),
+      api.getCompanies().then((cs) => cs.find((c) => c.company_id === companyId) || null).catch(() => null),
     ])
-      .then(([dashboard, socials]) => {
+      .then(([dashboard, socials, comp]) => {
         setData(dashboard);
         setSocialProfiles(socials);
+        setCompany(comp);
       })
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -65,9 +69,20 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Dashboard</h1>
-        <p className="text-sm text-text-secondary mt-0.5">OSINT intelligence overview</p>
+      <div className="flex items-center gap-4">
+        {company?.company_logo_url ? (
+          <img src={company.company_logo_url} alt="" className="w-10 h-10 rounded-lg object-contain border border-border bg-bg-tertiary p-0.5" />
+        ) : (
+          <div className="w-10 h-10 rounded-lg border border-border bg-bg-tertiary flex items-center justify-center">
+            <Building2 className="w-5 h-5 text-text-secondary" />
+          </div>
+        )}
+        <div>
+          <h1 className="text-xl font-semibold text-text-primary">
+            {company?.company_name || "Dashboard"}
+          </h1>
+          <p className="text-sm text-text-secondary mt-0.5">OSINT intelligence overview</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

@@ -4,3 +4,4 @@ aiosqlite
 pydantic
 requests
 holehe
+maigret

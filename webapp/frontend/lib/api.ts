@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8421/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -16,6 +16,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export interface Company {
   company_id: number;
   company_name: string;
+  company_logo_url?: string | null;
 }
 
 export interface DashboardStats {
@@ -85,6 +86,7 @@ export interface Credential {
   source_type: "email" | "username";
   identifier: string;
   password: string;
+  url: string | null;
   breach_context: string | null;
   triage_status: string;
   employee_name: string | null;
@@ -105,6 +107,29 @@ export interface Breach {
   email: string;
   breach_name: string;
   breach_date: string | null;
+}
+
+export interface Domain {
+  domain_id: number;
+  domain: string;
+  subdomain_count: number;
+}
+
+export interface Subdomain {
+  subdomain_id: number;
+  subdomain: string;
+  ip_address: string | null;
+  source: string | null;
+  first_seen: string | null;
+  domain: string | null;
+}
+
+export interface Username {
+  username_id: number;
+  username: string;
+  employee_id: number;
+  employee_name: string | null;
+  source: string;
 }
 
 export const api = {
@@ -147,6 +172,10 @@ export const api = {
     }),
 
   getCredentials: (companyId: number) => request<Credential[]>(`/credentials?company_id=${companyId}`),
+  getEmployeeCredentials: (employeeId: number) =>
+    request<Credential[]>(`/employees/${employeeId}/credentials`),
+  getEmployeeSecrets: (employeeId: number) =>
+    request<Secret[]>(`/employees/${employeeId}/secrets`),
   updateCredentialTriage: (id: number, sourceType: string, triage_status: string) =>
     request<{ updated: boolean }>(`/credentials/${id}?source_type=${sourceType}`, {
       method: "PATCH",
@@ -166,4 +195,25 @@ export const api = {
     }),
 
   getBreaches: (companyId: number) => request<Breach[]>(`/breaches?company_id=${companyId}`),
+
+  getDomains: (companyId: number) => request<Domain[]>(`/domains?company_id=${companyId}`),
+  addDomain: (domain: string, companyId: number) =>
+    request<Domain>("/domains", { method: "POST", body: JSON.stringify({ domain, company_id: companyId }) }),
+  deleteDomain: (domainId: number) => request<void>(`/domains/${domainId}`, { method: "DELETE" }),
+  getSubdomains: (companyId: number) => request<Subdomain[]>(`/subdomains?company_id=${companyId}`),
+  triggerDiscovery: (companyId: number) =>
+    request<{ total_found: number; new_subdomains: number; domains_scanned: number }>(
+      `/discover?company_id=${companyId}`, { method: "POST" }
+    ),
+
+  getUsernames: (employeeId: number) => request<Username[]>(`/employees/${employeeId}/usernames`),
+  addUsername: (employeeId: number, username: string) =>
+    request<Username>(`/employees/${employeeId}/usernames`, {
+      method: "POST", body: JSON.stringify({ username }),
+    }),
+  deleteUsername: (usernameId: number) => request<void>(`/usernames/${usernameId}`, { method: "DELETE" }),
+  lookupProfiles: (companyId: number) =>
+    request<{ found: number; usernames_checked: number }>(
+      `/social-profiles/lookup-usernames?company_id=${companyId}`, { method: "POST" }
+    ),
 };

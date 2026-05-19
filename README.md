@@ -1,6 +1,6 @@
 # EmploLeaks
 
-EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con interfaz CLI interactiva, diseñada para descubrir y correlacionar información sobre empleados de una empresa objetivo. Permite recopilar perfiles de LinkedIn, generar emails corporativos potenciales, buscar credenciales filtradas en bases de datos de leaks (ClickHouse) y verificar brechas conocidas a través de HaveIBeenPwned. Toda la información se almacena localmente en SQLite para su análisis posterior.
+EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con una interfaz CLI , diseñada para descubrir y correlacionar información sobre empleados de una empresa objetivo. Permite recopilar perfiles de LinkedIn, generar emails corporativos potenciales, buscar credenciales filtradas en bases de datos de leaks (ClickHouse internamente), verificar brechas conocidas a través de HaveIBeenPwned, descubrir infraestructura de la empresa y perfilar empleados en redes sociales. Toda la información se almacena localmente en SQLite para su análisis posterior.
 
 ## Características
 
@@ -9,13 +9,16 @@ EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con interfaz C
 - Búsqueda de credenciales filtradas en base de datos ClickHouse propia
 - Verificación de brechas conocidas con la API de HaveIBeenPwned
 - Escaneo de secretos en repositorios GitHub/GitLab con gitleaks
+- **Discovery de infraestructura:** enumeración de subdominios con assetfinder + SecurityTrails
+- **Profiling en redes sociales:** búsqueda por email (Holehe, ~120 plataformas) y por username (Maigret, 500+ plataformas)
+- **Telegram scraper (userbot):** daemon standalone que se une a canales aprobados de Telegram y baja archivos de credenciales automáticamente
+- **Parser de leaks 100% agéntico:** sin regex hardcodeadas. Un agente IA propone schema, valida con score sobre la muestra, recibe feedback con ejemplos de errores, y reintenta hasta converger. Auto-detecta UTF-16/UTF-8, banners ASCII art, country code prefixes, stealer logs (Redline/Lumma/Raccoon), formatos email/user/url arbitrarios
 - Almacenamiento local de toda la información en SQLite
 - Generación de reportes HTML interactivos con fotos de perfil
 - Clasificación automática de empleados por departamento usando IA (OpenAI, Ollama, etc.)
 - Exportación de resultados a CSV
 - Sistema modular de plugins (LinkedIn, GitHub, HIBP)
 - Autoguardado y carga automática de configuración de plugins
-- Búsqueda de perfiles en redes sociales (~120 plataformas) con Holehe
 - Webapp administrativa con FastAPI + Next.js para triage de resultados
 
 ## Estructura del Proyecto
@@ -23,6 +26,7 @@ EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con interfaz C
 ```
 emploleaks/
 ├── emploleaks.py             # Script principal (CLI interactiva con cmd2)
+├── telegram_sync.py          # Daemon userbot de Telegram (Telethon, standalone)
 ├── requirements.txt          # Dependencias de Python
 ├── README.md
 ├── .gitignore
@@ -33,11 +37,10 @@ emploleaks/
 ├── utils/
 │   ├── logging_format.py     # Configuración de logging con colores
 │   ├── ai_classifier.py      # Clasificación de roles con IA (OpenAI/Ollama)
-│   ├── leak_parser.py        # Parser de archivos de leaks con detección AI
-│   └── email_lookup.py       # Búsqueda de emails en redes sociales (Holehe)
-├── workflows/                # Scripts de automatización (legacy)
-│   ├── check_leaked_passwords.py
-│   └── get_public_repos.py
+│   ├── leak_parser.py        # Parser de leaks 100% agéntico (loop de IA, sin regex)
+│   ├── email_lookup.py       # Búsqueda de emails en redes sociales (Holehe)
+│   ├── profile_lookup.py     # Búsqueda de usernames en redes sociales (Maigret)
+│   └── discovery.py          # Enumeración de subdominios (assetfinder + SecurityTrails opcional)
 ├── clickhouse-docker/        # Docker Compose para levantar ClickHouse
 │   ├── docker-compose.yml
 │   └── config/
@@ -56,7 +59,7 @@ emploleaks/
 
 ## Requisitos
 
-- Python 3.8+
+- Python 3.10+
 - pip
 - Conexión a Internet
 - **Opcional:** Docker y Docker Compose (para levantar ClickHouse localmente)
@@ -145,15 +148,60 @@ passwd =
 dbname = credentials_db
 ```
 
-Si ClickHouse está disponible al iniciar, la conexión se establece automáticamente. La base de datos y tabla se crean si no existen.
+Si ClickHouse está configurado en `tokens.ini`, la conexión se establece automáticamente al iniciar.
 
 ### Búsqueda de Credenciales y Brechas
 
 | Comando | Descripción |
 |---------|-------------|
-| `find_passwords <modo>` | Busca credenciales filtradas en ClickHouse. Modos: `find_all`, `only_usernames`, `only_emails` |
+| `find_passwords <modo>` | Busca credenciales en ClickHouse + [ProxyNova COMB](https://www.proxynova.com/tools/comb/) (3.2B credentials). Modos: `find_all`, `only_usernames`, `only_emails` |
+| `find_passwords <modo> --no-proxynova` | Solo busca en ClickHouse local |
+| `find_passwords <modo> --no-clickhouse` | Solo busca en ProxyNova COMB (no requiere ClickHouse) |
 | `find_passwords <modo> --email <email>` | Busca credenciales para un email específico |
 | `find_breaches` | Busca brechas en HIBP para todos los emails de la empresa (requiere plugin `hibp` activo) |
+
+**ProxyNova COMB** es una base de datos pública con 3.2 mil millones de credenciales filtradas (Combination Of Many Breaches). No requiere API key y se consulta automáticamente en cada búsqueda. Usar `--no-proxynova` para desactivarla.
+
+### Discovery de Infraestructura
+
+| Comando | Descripción |
+|---------|-------------|
+| `add_domain <dominio>` | Asocia un dominio a la empresa seleccionada (ej: `add_domain faradaysec.com`) |
+| `discover` | Ejecuta enumeración de subdominios contra todos los dominios de la empresa usando `assetfinder` (+ SecurityTrails opcional), resolviendo DNS |
+| `print --data domains` | Muestra los dominios registrados y la cantidad de subdominios encontrados |
+| `print --data subdomains` | Muestra todos los subdominios con su IP, fuente y fecha de descubrimiento |
+
+El módulo de Discovery delega la enumeración pasiva a [`assetfinder`](https://github.com/tomnomnom/assetfinder), que internamente agrega resultados de crt.sh, HackerTarget, BufferOver y otras fuentes sin API key. Se espera el binario en `$PATH` (instalación: `go install github.com/tomnomnom/assetfinder@latest`).
+
+Opcionalmente, si configurás una API key de SecurityTrails sus subdominios se mergean con los de assetfinder:
+```ini
+[discovery]
+# securitytrails_key = your_key_here
+```
+
+### Profiling en Redes Sociales
+
+| Comando | Descripción |
+|---------|-------------|
+| `lookup_emails` | Busca emails confirmados en ~120 plataformas con Holehe |
+| `lookup_emails --include-potential` | Incluye también los emails generados |
+| `lookup_emails --email user@mail.com` | Busca un email específico |
+| `lookup_emails --all` | Busca en las 120+ plataformas (no solo las configuradas) |
+| `lookup_emails --list-platforms` | Lista todas las plataformas disponibles |
+| `lookup_profiles` | Busca perfiles por username con Maigret (requiere usernames cargados) |
+| `lookup_profiles --employee "Juan"` | Busca solo para un empleado específico |
+
+**Holehe** (email lookup): utiliza la técnica de "forgot password" para determinar si un email está registrado en cada plataforma, sin alertar al dueño. Las plataformas se configuran en `tokens.ini`:
+```ini
+[holehe]
+platforms = google, discord, github, instagram, twitter, spotify, ...
+```
+
+**Maigret** (username lookup): busca si un username existe en 500+ plataformas de redes sociales. Los usernames se agregan manualmente por empleado desde la webapp. Las plataformas se filtran opcionalmente en `tokens.ini`:
+```ini
+[maigret]
+# platforms = instagram, twitter, facebook, tiktok, reddit, github
+```
 
 ### Visualización y Exportación
 
@@ -167,20 +215,12 @@ Si ClickHouse está disponible al iniciar, la conexión se establece automática
 | `print --data phones` | Muestra números de teléfono |
 | `print --data websites` | Muestra sitios web |
 | `print --data secrets` | Muestra secretos encontrados en repositorios |
+| `print --data domains` | Muestra dominios registrados |
+| `print --data subdomains` | Muestra subdominios descubiertos |
 | `print --data all` | Muestra todo consolidado por empleado |
 | `print --data all --html` | Genera un reporte HTML interactivo con fotos |
 | `print --data all --html --ai` | Genera reporte HTML agrupando empleados por departamento usando IA |
 | `print --data <tipo> --export` | Exporta los datos a un archivo CSV con timestamp |
-
-### Email Lookup (Redes Sociales)
-
-| Comando | Descripción |
-|---------|-------------|
-| `lookup_emails` | Busca emails confirmados en ~120 plataformas (X, Instagram, Spotify, etc.) |
-| `lookup_emails --include-potential` | Incluye también los emails generados |
-| `lookup_emails --email user@mail.com` | Busca un email específico |
-
-Utiliza la técnica de "forgot password" para determinar si un email está registrado en cada plataforma, sin alertar al dueño de la cuenta. Los resultados se guardan en la tabla `social_profiles` de SQLite.
 
 ### Configuración de IA y Clasificación
 
@@ -197,19 +237,102 @@ La clasificación por IA analiza los títulos/roles de los empleados y los agrup
 - **OpenAI:** `set_ai --endpoint https://api.openai.com/v1 --key sk-... --model gpt-4o-mini`
 - **Cualquier otro compatible:** LM Studio, Together AI, etc.
 
+### Telegram Scraper (Userbot)
+
+Daemon standalone que usa una cuenta personal de Telegram (vía Telethon) para unirse a canales/grupos aprobados, descargar archivos `.txt/.csv/.dat/.zip/.gz` y dejarlos en `leaks_data/telegram/<chat>/`. El `import_leaks` posterior los ingiere a ClickHouse usando el parser agéntico. **Decoupled del CLI** — corre como proceso aparte, así puede estar 24/7 sin que la CLI esté abierta.
+
+**Setup inicial (one-time):**
+
+1. Crear app en https://my.telegram.org/apps para obtener `api_id` y `api_hash`.
+2. Agregar al `config/tokens.ini`:
+   ```ini
+   [telegram]
+   api_id = 12345678
+   api_hash = abcd1234...
+   session = config/telegram.session
+   download_root = leaks_data/telegram
+   allowed_extensions = txt, csv, dat, zip, gz
+   default_backfill_limit = 10
+   ```
+3. Login interactivo (te pide tu número, código por app, opcionalmente 2FA):
+   ```bash
+   python3.13 telegram_sync.py login
+   ```
+
+**Subcomandos:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `login` | Autenticación inicial. Persiste sesión en `config/telegram.session` |
+| `list_groups` | Lista todos los chats/canales donde está tu cuenta, y los snapshotea en SQLite |
+| `approve <chat_id> [--limit N]` | Marca un chat como aprobado y corre backfill de los últimos N mensajes |
+| `unapprove <chat_id>` | Quita la aprobación |
+| `list_approved` | Tabla de chats aprobados con conteo de archivos bajados |
+| `backfill <chat_id> [--limit N]` | Re-baja los últimos N mensajes de un chat aprobado |
+| `run [--watch]` | Backfill de todos los aprobados; con `--watch` queda escuchando NewMessage events |
+| `status` | Resumen: aprobados / archivos bajados / disco usado |
+
+**Tablas nuevas en `data/emploleaks.db`:**
+
+| Tabla | Descripción |
+|-------|-------------|
+| `telegram_groups` | Snapshot de chats (chat_id, title, username, approved, backfill_limit, last_sync_at) |
+| `telegram_files` | Archivos bajados con dedup por `(chat_id, message_id)` y por `SHA-256` del contenido |
+
+**Daemon en background:**
+```bash
+nohup python3.13 telegram_sync.py run --watch >> logs/telegram.log 2>&1 &
+echo $! > /tmp/telegram_daemon.pid
+# Para parar:
+# kill $(cat /tmp/telegram_daemon.pid)
+```
+
+---
+
+### Parser de Leaks 100% Agéntico
+
+El módulo `utils/leak_parser.py` usa **únicamente un agente de IA** para parsear cada archivo. No hay regex hardcodeadas (fueron eliminadas porque cada formato nuevo introducía bugs sutiles de extracción).
+
+**Pipeline del agente:**
+```
+1. Auto-detectar encoding (BOM sniffing): utf-8 / utf-8-sig / utf-16 / utf-32.
+2. Sampling inteligente: tomar las primeras 80 líneas que parezcan credenciales
+   (con separadores típicos, alfanumérico >50%) — skipea banners ASCII art.
+3. La IA recibe 50 líneas + system prompt con familias comunes de formato y
+   propone {separator, fields, skip_lines}.
+4. Aplicamos el schema a la muestra SIN filtros → list of tuples.
+5. Validamos con _is_clean_credential → score = % rows válidas.
+6. Si score ≥ 0.8 y ≥ 5 rows → aplicar al archivo completo.
+7. Si no → mandar al agente la (source_line ↔ extracción mala) en pares,
+   más checklist de errores típicos. Goto 3.
+8. Hasta 7 iteraciones. Si no converge a 0.8: fallback al mejor schema si
+   alcanzó ≥ 0.7. Bajo eso → skip con warning (nunca ingerimos basura).
+```
+
+**`_is_clean_credential` — validación transversal:**
+- Username: longitud 1-64, sin `/ : \ space`, no empieza con `http/android/ftp//`.
+- Password: longitud 1-256, sin `/`, máximo un `:`, sin whitespace, no empieza con URL prefix.
+
+**Determinismo:** `temperature=0` en todas las llamadas + en-memory caching dentro de un mismo run. El mismo archivo produce el mismo schema entre runs → `import_leaks` es idempotente.
+
+**Costo típico:** 1-3 llamadas al API por archivo, ~$0.0001-$0.0005 con gpt-4o-mini. Para 12 archivos: ~$0.005 = medio centavo.
+
+---
+
 ### Webapp Administrativa
 
 | Comando | Descripción |
 |---------|-------------|
-| `python emploleaks.py --webapp` | Lanza la webapp (backend en :8000, frontend en :3000) |
+| `python emploleaks.py --webapp` | Lanza la webapp (backend en :8421, frontend en :3421) |
 
 La webapp permite:
-- Navegar empleados, credenciales, secretos y brechas de forma visual
+- Dashboard con estadísticas, hallazgos clave y acciones rápidas
+- Gestión de empleados con secciones colapsables por departamento y drag & drop
+- **Connected Accounts**: visualizar perfiles en redes sociales, buscar por email (Holehe) y por username (Maigret)
+- **Discovery**: gestionar dominios, ejecutar enumeración de subdominios, ver resultados con IP y fuente
 - Triage de credenciales y secretos (marcar como verificado, no funciona, falso positivo)
-- Edición de emails (agregar, modificar, eliminar)
-- Drag & drop de empleados entre departamentos
+- Edición de emails y usernames por empleado (agregar, modificar, eliminar)
 - Clasificación con IA desde la interfaz
-- Dashboard con estadísticas y hallazgos clave
 
 ---
 
@@ -217,7 +340,7 @@ La webapp permite:
 
 ### LinkedIn
 
-Permite buscar empleados de una empresa en LinkedIn usando cookies de sesión del navegador, y generar emails corporativos potenciales.
+Permite buscar empleados de una empresa en LinkedIn usando cookies de sesión del navegador, y generar emails corporativos potenciales. Captura automáticamente el logo de la empresa.
 
 **Opciones:**
 
@@ -375,8 +498,8 @@ Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al 
 
 | Tabla | Descripción |
 |-------|-------------|
-| `companies` | Empresas registradas |
-| `employees` | Empleados descubiertos (nombre, título, empresa) |
+| `companies` | Empresas registradas (nombre, logo) |
+| `employees` | Empleados descubiertos (nombre, título, foto, empresa, departamento) |
 | `emails` | Emails confirmados (obtenidos de contact_info de LinkedIn) |
 | `potential_emails` | Emails potenciales generados por formato |
 | `passwords` | Contraseñas encontradas asociadas a emails |
@@ -387,7 +510,10 @@ Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al 
 | `phones` | Números de teléfono |
 | `websites` | Sitios web personales |
 | `secrets_repos` | Secretos encontrados en repositorios con gitleaks |
-| `social_profiles` | Perfiles en redes sociales encontrados con Holehe |
+| `social_profiles` | Perfiles en redes sociales (Holehe + Maigret) |
+| `domains` | Dominios de la empresa para discovery |
+| `subdomains` | Subdominios descubiertos (IP, fuente, fecha) |
+| `usernames` | Usernames asociados a empleados para Maigret |
 
 ---
 
@@ -400,7 +526,7 @@ Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al 
 2. add_company --name target_corp
 3. select_company --name target_corp
 
-# Scraping de LinkedIn
+# Scraping de LinkedIn (captura empleados + logo de empresa)
 4. use --plugin linkedin
 5. setopt JSESSIONID <cookie>
 6. setopt li-at <cookie>
@@ -408,34 +534,49 @@ Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al 
 8. run find target_corp targetcorp.com --email-format {n}.{s}
 9. print --data emails
 
+# Discovery de infraestructura
+10. add_domain targetcorp.com
+11. discover
+12. print --data subdomains
+
 # Credenciales filtradas (ClickHouse se conecta automáticamente desde config)
-10. find_passwords only_emails
+13. find_passwords only_emails
 
 # Brechas conocidas
-11. use --plugin hibp
-12. setopt apikey <hibp_key>
-13. find_breaches
+14. use --plugin hibp
+15. setopt apikey <hibp_key>
+16. find_breaches
 
 # Secretos en repositorios
-14. use --plugin github
-15. setopt token <github_token>
-16. run find_secrets
+17. use --plugin github
+18. setopt token <github_token>
+19. run find_secrets
 
-# Perfiles en redes sociales
-17. deactivate
-18. lookup_emails
+# Profiling en redes sociales (por email)
+20. deactivate
+21. lookup_emails
+
+# Profiling en redes sociales (por username, requiere cargar usernames en webapp)
+22. lookup_profiles
 
 # Clasificación por departamento
-19. classify
+23. classify
 
 # Reportes y exportación
-20. print --data all --export
-21. print --data all --html --ai
+24. print --data all --export
+25. print --data all --html --ai
 
 # Webapp para triage interactivo
-22. python emploleaks.py --webapp
+26. python emploleaks.py --webapp
+
+# Telegram scraper (proceso aparte, en otra terminal)
+27. python3.13 telegram_sync.py login           # one-time
+28. python3.13 telegram_sync.py list_groups
+29. python3.13 telegram_sync.py approve <chat_id> --limit 5
+30. python3.13 telegram_sync.py run --watch     # daemon en watch
+# Archivos van a leaks_data/telegram/... → re-ejecutar import_leaks los absorbe.
 ```
 
 ## Disclaimer
 
-Esta herramienta está diseñada únicamente para fines educativos, de investigación en seguridad y pruebas de penetración autorizadas. El uso de esta herramienta para actividades maliciosas o no autorizadas está estrictamente prohibido. Los usuarios son responsables de cumplir con todas las leyes y términos de servicio aplicables.
+Esta herramienta está diseñada únicamente para fines educativos, de investigación en seguridad y pruebas de pentesting autorizadas. El uso de esta herramienta para actividades maliciosas o no autorizadas está estrictamente prohibido. Los usuarios son responsables de cumplir con todas las leyes y términos de servicio del proyecto.

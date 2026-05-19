@@ -60,7 +60,7 @@ def classify_roles(titles, api_endpoint, api_key, model):
         'messages': [
             {'role': 'user', 'content': prompt}
         ],
-        'temperature': 0.1,
+        'temperature': 0,
     }
 
     try:
