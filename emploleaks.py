@@ -29,7 +29,7 @@ from plugins.linkedin import LinkedinModule
 from plugins.hibp import HaveIBeenPwnedModule
 from utils.ai_classifier import classify_roles
 from utils.leak_parser import parse_file, iter_leak_files
-from utils.email_lookup import lookup_email_sync
+from utils.email_lookup import lookup_email_sync, get_available_platforms, DEFAULT_PLATFORMS
 
 # Configurar logging para clickhouse_driver
 clickhouse_logger = logging.getLogger('clickhouse_driver')
@@ -148,6 +148,10 @@ parser_lookup.add_argument('--include-potential', action='store_true',
                            help='Also check potential (generated) emails, not just confirmed ones')
 parser_lookup.add_argument('--email', type=str, default=None,
                            help='Lookup a single specific email address')
+parser_lookup.add_argument('--all', action='store_true',
+                           help='Check all 120+ platforms instead of configured subset')
+parser_lookup.add_argument('--list-platforms', action='store_true',
+                           help='Show all available platform names and exit')
 
 autosave_options = cmd2.Cmd2ArgumentParser(description="Enable or disable automatic saving/loading of plugin configurations.")
 autosave_options.add_argument('--enable', action="store_true", default=False, help='Enable the feature')
@@ -2723,10 +2727,39 @@ with this command again, pointing to a directory containing credential files.
     def do_lookup_emails(self, args):
         """Check if employee emails are registered on social media platforms using Holehe.
 
-        By default only checks confirmed emails. Use --include-potential to also check
-        generated email addresses. Use --email to check a single specific email.
+        By default checks a curated set of ~20 platforms (configurable in tokens.ini [holehe]).
+        Use --all to scan all 120+ supported platforms. Use --list-platforms to see available names.
         Does not alert the target email address.
+
+        Examples:
+            lookup_emails                      Check confirmed emails on default platforms
+            lookup_emails --all                Check on all 120+ platforms
+            lookup_emails --include-potential   Also check generated emails
+            lookup_emails --email user@mail.com Check a single email
+            lookup_emails --list-platforms      Show available platform names
         """
+        if args.list_platforms:
+            platforms = get_available_platforms()
+            log.info(f"Available platforms ({len(platforms)}):")
+            for p in platforms:
+                marker = " [default]" if p in DEFAULT_PLATFORMS else ""
+                self.poutput(f"  {p}{marker}")
+            return
+
+        platforms = None
+        if not args.all:
+            config = configparser.RawConfigParser()
+            config.read(self.configfilepath)
+            if config.has_section('holehe') and config.has_option('holehe', 'platforms'):
+                raw = config.get('holehe', 'platforms')
+                platforms = [p.strip() for p in raw.split(',') if p.strip()]
+                log.info(f"Using {len(platforms)} platforms from config: {', '.join(platforms)}")
+            else:
+                platforms = list(DEFAULT_PLATFORMS)
+                log.info(f"Using {len(platforms)} default platforms (configure in tokens.ini [holehe] platforms=...)")
+        else:
+            log.info("Scanning all 120+ platforms...")
+
         cur = self.local_conn.cursor()
 
         if args.email:
@@ -2754,7 +2787,7 @@ with this command again, pointing to a directory containing credential files.
             cur.close()
             return
 
-        log.info(f"Looking up {len(emails_to_check)} email(s) across social platforms...")
+        log.info(f"Looking up {len(emails_to_check)} email(s)...")
         total_found = 0
 
         for i, entry in enumerate(emails_to_check, 1):
@@ -2762,7 +2795,7 @@ with this command again, pointing to a directory containing credential files.
             name = entry.get('name', '')
             log.info(f"[{i}/{len(emails_to_check)}] Checking {email} ({name})...")
 
-            results = lookup_email_sync(email)
+            results = lookup_email_sync(email, platforms)
 
             for r in results:
                 if not r['exists']:

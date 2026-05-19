@@ -1,12 +1,13 @@
 import os
 import sys
+import configparser
 from fastapi import APIRouter, HTTPException, Query
 from database import get_db
 from models import SocialProfileOut
 
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..')
 sys.path.insert(0, PROJECT_ROOT)
-from utils.email_lookup import lookup_email_sync
+from utils.email_lookup import lookup_email_sync, DEFAULT_PLATFORMS
 
 router = APIRouter(tags=["social"])
 
@@ -49,10 +50,16 @@ async def trigger_lookup(company_id: int = Query(...)):
         if not rows:
             raise HTTPException(400, "No confirmed emails found for this company.")
 
+        config = configparser.RawConfigParser()
+        config.read(os.path.join(PROJECT_ROOT, 'config', 'tokens.ini'))
+        platforms = list(DEFAULT_PLATFORMS)
+        if config.has_section('holehe') and config.has_option('holehe', 'platforms'):
+            platforms = [p.strip() for p in config.get('holehe', 'platforms').split(',') if p.strip()]
+
         total_found = 0
         for r in rows:
             email_id, email, employee_id = r[0], r[1], r[2]
-            results = lookup_email_sync(email)
+            results = lookup_email_sync(email, platforms)
             for item in results:
                 if not item.get("exists"):
                     continue
