@@ -52,5 +52,8 @@ config/tokens.ini
 !logs/.gitkeep
 !data/.gitkeep
 
+# Leak data (large credential dumps)
+leaks_data/
+
 # Backup
 backup/

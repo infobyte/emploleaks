@@ -335,7 +335,7 @@ class GithubModule:
                                     self.local_conn.rollback()
                             
                             if secrets_found > 0:
-                                log.success(f"Found {secrets_found} secrets in {repo_url.split('/')[-1]}")
+                                log.info(f"Found {secrets_found} secrets in {repo_url.split('/')[-1]}")
                                 return True  # Return True to indicate secrets found
                                     
                         except (json.JSONDecodeError, IOError) as e:
@@ -459,7 +459,7 @@ class GithubModule:
             log.info("\nScan completed!")
             log.info(f"Processed {processed} repositories")
             if secrets_found > 0:
-                log.success(f"Found secrets in {secrets_found} repositories")
+                log.info(f"Found secrets in {secrets_found} repositories")
             if skipped > 0:
                 log.warning(f"Skipped {skipped} repositories due to size limit")
             if self.large_repos and not download_all:

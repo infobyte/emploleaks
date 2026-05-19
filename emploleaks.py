@@ -28,6 +28,7 @@ from plugins.github import GithubModule
 from plugins.linkedin import LinkedinModule
 from plugins.hibp import HaveIBeenPwnedModule
 from utils.ai_classifier import classify_roles
+from utils.leak_parser import parse_file, iter_leak_files
 
 # Configurar logging para clickhouse_driver
 clickhouse_logger = logging.getLogger('clickhouse_driver')
@@ -74,26 +75,22 @@ parser_connect.add_argument('--port',
                                    default="5432",
                                    help="the database's port")
 
-# Parser for internal PostgreSQL database connection
 parser_connect_leaks = cmd2.Cmd2ArgumentParser()
-parser_connect_leaks.add_argument('--user',
-                                   required=True,
-                                   help="the ClickHouse database user")
-parser_connect_leaks.add_argument('--passwd',
-                                   required=True,
-                                   help='the ClickHouse database password')
-parser_connect_leaks.add_argument('--dbname',
-                                   required=True,
-                                   help="the ClickHouse database name")
-parser_connect_leaks.add_argument('--host',
-                                   default="localhost",
-                                   help="the ClickHouse database host")
-parser_connect_leaks.add_argument('--port',
-                                   default="9000",
-                                   help="the ClickHouse database port")
+parser_connect_leaks.add_argument('--user', default=None,
+                                   help="ClickHouse user (default: from config or 'default')")
+parser_connect_leaks.add_argument('--passwd', default=None,
+                                   help="ClickHouse password (default: from config or empty)")
+parser_connect_leaks.add_argument('--dbname', default=None,
+                                   help="ClickHouse database name (default: from config or 'credentials_db')")
+parser_connect_leaks.add_argument('--host', default=None,
+                                   help="ClickHouse host (default: from config or 'localhost')")
+parser_connect_leaks.add_argument('--port', default=None,
+                                   help="ClickHouse port (default: from config or '9000')")
 parser_connect_leaks.add_argument('--secure',
                                    action='store_true',
                                    help="use secure connection (TLS)")
+parser_connect_leaks.add_argument('--save', action='store_true',
+                                   help="save connection settings to config")
 
 create_db_parser = cmd2.Cmd2ArgumentParser()
 create_db_parser.add_argument('--user', required=True, help='ClickHouse database user')
@@ -160,6 +157,12 @@ parser_run_find = cmd2.Cmd2ArgumentParser()
 parser_run_find.add_argument('company_name', help='LinkedIn company name')
 parser_run_find.add_argument('company_domain', help='Company email domain')
 parser_run_find.add_argument('--email-format', help='Optional email format for potential emails (e.g. {n}.{s} for first initial + last name)')
+
+parser_import_leaks = cmd2.Cmd2ArgumentParser()
+parser_import_leaks.add_argument('directory', nargs='?', default=None,
+                                  help='Directory with leak files (default: leaks_data/)')
+parser_import_leaks.add_argument('--no-ai', action='store_true',
+                                  help='Skip AI format detection for unknown files')
 
 # Create parsers for commands
 parser_use = argparse.ArgumentParser(description='Use a plugin')
@@ -245,6 +248,12 @@ class EmploLeaksCLI(cmd2.Cmd):
         self.ai_endpoint = 'http://localhost:11434/v1'
         self.ai_key = 'ollama'
         self.ai_model = 'llama3'
+        
+        self.ch_host = 'localhost'
+        self.ch_port = '9000'
+        self.ch_user = 'default'
+        self.ch_passwd = ''
+        self.ch_dbname = 'credentials_db'
         
         self._load_global_config()
         
@@ -333,11 +342,11 @@ class EmploLeaksCLI(cmd2.Cmd):
                 email_id INTEGER,
                 breach_context TEXT,
                 FOREIGN KEY (email_id) REFERENCES emails (email_id),
-                FOREIGN KEY (email_id) REFERENCES potential_emails (email_id)
+                FOREIGN KEY (email_id) REFERENCES potential_emails (email_id),
+                UNIQUE(password, email_id, breach_context)
             )
         """)
-        
-        # Crear tabla de contraseñas de usuarios si no existe
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS username_passwords (
                 password_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -345,7 +354,8 @@ class EmploLeaksCLI(cmd2.Cmd):
                 password TEXT NOT NULL,
                 breach_context TEXT,
                 company_id INTEGER,
-                FOREIGN KEY (company_id) REFERENCES companies (company_id)
+                FOREIGN KEY (company_id) REFERENCES companies (company_id),
+                UNIQUE(username, password, breach_context, company_id)
             )
         """)
         
@@ -428,6 +438,9 @@ class EmploLeaksCLI(cmd2.Cmd):
             )
         """)
         
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_passwords_unique ON passwords(password, email_id, breach_context)")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_username_passwords_unique ON username_passwords(username, password, breach_context, company_id)")
+
         self.local_conn.commit()
         cur.close()
 
@@ -444,6 +457,14 @@ class EmploLeaksCLI(cmd2.Cmd):
             self.ai_model = config.get('ai', 'model', fallback=self.ai_model)
             log.debug(f"AI config loaded: model={self.ai_model}")
 
+        if config.has_section('clickhouse'):
+            self.ch_host = config.get('clickhouse', 'host', fallback='localhost')
+            self.ch_port = config.get('clickhouse', 'port', fallback='9000')
+            self.ch_user = config.get('clickhouse', 'user', fallback='default')
+            self.ch_passwd = config.get('clickhouse', 'passwd', fallback='')
+            self.ch_dbname = config.get('clickhouse', 'dbname', fallback='credentials_db')
+            self._auto_connect_clickhouse()
+
     def _save_config_section(self, section, values):
         """Save a section of key-value pairs to the config file."""
         config = configparser.RawConfigParser()
@@ -456,6 +477,51 @@ class EmploLeaksCLI(cmd2.Cmd):
         with open(self.configfilepath, 'w') as f:
             config.write(f)
 
+    def _auto_connect_clickhouse(self):
+        """Try to connect to ClickHouse using saved config. Fails silently."""
+        try:
+            self.leaks_conn = clickhouse_driver.Client(
+                host=self.ch_host,
+                port=int(self.ch_port),
+                user=self.ch_user,
+                password=self.ch_passwd,
+            )
+            self.leaks_conn.execute('SELECT 1')
+            self._ensure_credentials_db()
+            log.debug(f"ClickHouse auto-connected to {self.ch_host}:{self.ch_port}")
+        except Exception:
+            self.leaks_conn = None
+
+    def _ensure_credentials_db(self):
+        """Create the credentials database and table if they don't exist."""
+        if not self.leaks_conn:
+            return
+        try:
+            self.leaks_conn.execute(f'CREATE DATABASE IF NOT EXISTS {self.ch_dbname}')
+            self.leaks_conn.execute(f'''
+                CREATE TABLE IF NOT EXISTS {self.ch_dbname}.credentials (
+                    mail_username String,
+                    mail_domain String,
+                    mail_tld String,
+                    password String,
+                    uri_subdomain String,
+                    uri_domain String,
+                    uri_tld String
+                ) ENGINE = ReplacingMergeTree()
+                ORDER BY (mail_username, mail_domain, mail_tld, password, uri_subdomain, uri_domain, uri_tld)
+                SETTINGS index_granularity = 8192
+            ''')
+            self.leaks_conn.disconnect()
+            self.leaks_conn = clickhouse_driver.Client(
+                host=self.ch_host,
+                port=int(self.ch_port),
+                database=self.ch_dbname,
+                user=self.ch_user,
+                password=self.ch_passwd,
+            )
+        except Exception as e:
+            log.debug(f"ClickHouse DB init: {e}")
+
     def __del__(self):
         """Cleanup database connections on object destruction"""
         if self.local_conn:
@@ -463,7 +529,7 @@ class EmploLeaksCLI(cmd2.Cmd):
         if self.conn:
             self.conn.close()
         if self.leaks_conn:
-            self.leaks_conn.disconnect()  # ClickHouse specific cleanup
+            self.leaks_conn.disconnect()
 
     def leakdb_connected(func):
         def wrapper(*args, **kwargs):
@@ -498,14 +564,13 @@ class EmploLeaksCLI(cmd2.Cmd):
         return wrapper
 
     def _generate_html_report(self, filename, use_ai=False):
-        """Generate an interactive HTML report with employee data and profile photos."""
+        """Generate a modular dashboard HTML report with tabs for each data category."""
         cur = self.local_conn.cursor()
+        esc = self._html_escape
 
         cur.execute("""
             SELECT e.employee_id, e.name, e.title, e.profile_photo_url
-            FROM employees e
-            WHERE e.company_id = ?
-            ORDER BY e.name
+            FROM employees e WHERE e.company_id = ? ORDER BY e.name
         """, (self.company_id,))
         employees = cur.fetchall()
 
@@ -515,19 +580,19 @@ class EmploLeaksCLI(cmd2.Cmd):
             return
 
         role_to_dept = {}
-        departments = {}
         if use_ai:
             titles = [emp['title'] for emp in employees if emp['title']]
             role_to_dept = classify_roles(titles, self.ai_endpoint, self.ai_key, self.ai_model) or {}
 
         def get_dept(title):
             if not use_ai or not role_to_dept:
-                return None
+                return ''
             return role_to_dept.get(title, 'Other')
 
-        cards_by_dept = {}
-        card_count_with_email = 0
-        card_count_breached = 0
+        emp_data = []
+        all_breaches = []
+        all_email_creds = []
+        all_secrets = []
 
         for emp in employees:
             eid = emp['employee_id']
@@ -538,268 +603,427 @@ class EmploLeaksCLI(cmd2.Cmd):
 
             cur.execute("SELECT email FROM emails WHERE employee_id = ?", (eid,))
             confirmed = [r['email'] for r in cur.fetchall()]
-
             cur.execute("SELECT email FROM potential_emails WHERE employee_id = ?", (eid,))
             potential = [r['email'] for r in cur.fetchall()]
-
             cur.execute("SELECT phone_number FROM phones WHERE employee_id = ?", (eid,))
             phones = [r['phone_number'] for r in cur.fetchall()]
-
             cur.execute("SELECT website_url FROM websites WHERE employee_id = ?", (eid,))
             websites = [r['website_url'] for r in cur.fetchall()]
-
             cur.execute("SELECT github_url FROM githubs WHERE employee_id = ?", (eid,))
             githubs = [r['github_url'] for r in cur.fetchall()]
-
             cur.execute("SELECT twitter_url FROM twitters WHERE employee_id = ?", (eid,))
             twitters = [r['twitter_url'] for r in cur.fetchall()]
 
             cur.execute("""
-                SELECT b.breach_name, b.breach_date FROM breaches b
+                SELECT b.breach_name, b.breach_date, em.email FROM breaches b
                 INNER JOIN emails em ON b.email_id = em.email_id
                 WHERE em.employee_id = ?
             """, (eid,))
-            breaches = [f"{r['breach_name']} ({r['breach_date'] or '?'})" for r in cur.fetchall()]
+            for r in cur.fetchall():
+                all_breaches.append({'name': name, 'email': r['email'], 'breach': r['breach_name'], 'date': r['breach_date'] or '—'})
 
             cur.execute("""
-                SELECT p.password, p.breach_context FROM passwords p
-                INNER JOIN emails em ON p.email_id = em.email_id
-                WHERE em.employee_id = ?
+                SELECT p.password, p.breach_context, em.email FROM passwords p
+                INNER JOIN emails em ON p.email_id = em.email_id WHERE em.employee_id = ?
             """, (eid,))
-            email_pwds = cur.fetchall()
+            for r in cur.fetchall():
+                all_email_creds.append({'name': name, 'identifier': r['email'], 'password': r['password'], 'context': r['breach_context'] or '', 'type': 'confirmed'})
             cur.execute("""
-                SELECT p.password, p.breach_context FROM passwords p
-                INNER JOIN potential_emails pe ON p.email_id = pe.email_id
-                WHERE pe.employee_id = ?
+                SELECT p.password, p.breach_context, pe.email FROM passwords p
+                INNER JOIN potential_emails pe ON p.email_id = pe.email_id WHERE pe.employee_id = ?
             """, (eid,))
-            pot_pwds = cur.fetchall()
-            passwords = [f"{r['password']} ({r['breach_context'] or ''})" for r in list(email_pwds) + list(pot_pwds)]
+            for r in cur.fetchall():
+                all_email_creds.append({'name': name, 'identifier': r['email'], 'password': r['password'], 'context': r['breach_context'] or '', 'type': 'potential'})
 
-            cur.execute("""
-                SELECT secret_type, secret_value, repo_url, file_path
-                FROM secrets_repos WHERE employee_id = ?
-            """, (eid,))
-            secrets_rows = cur.fetchall()
-            secrets = [
-                f"{r['secret_type']}: {r['secret_value'][:40]}... ({r['repo_url'].split('/')[-1]}/{r['file_path'] or '?'})"
-                if len(r['secret_value'] or '') > 40
-                else f"{r['secret_type']}: {r['secret_value']} ({r['repo_url'].split('/')[-1]}/{r['file_path'] or '?'})"
-                for r in secrets_rows
-            ]
+            cur.execute("SELECT secret_type, secret_value, repo_url, file_path FROM secrets_repos WHERE employee_id = ?", (eid,))
+            for r in cur.fetchall():
+                all_secrets.append({'name': name, 'type': r['secret_type'], 'value': r['secret_value'] or '', 'repo': r['repo_url'] or '', 'file': r['file_path'] or ''})
 
-            def make_list(items, css_class=''):
-                if not items:
-                    return ''
-                return ''.join(f'<li class="{css_class}">{self._html_escape(i)}</li>' for i in items)
+            emp_data.append({
+                'name': name, 'title': title, 'photo': photo, 'dept': dept,
+                'confirmed': confirmed, 'potential': potential, 'phones': phones,
+                'websites': websites, 'githubs': githubs, 'twitters': twitters,
+                'has_breaches': bool(all_breaches and any(b['name'] == name for b in all_breaches)),
+                'has_passwords': bool(all_email_creds and any(c['name'] == name for c in all_email_creds)),
+                'has_secrets': bool(all_secrets and any(s['name'] == name for s in all_secrets)),
+            })
 
-            details_sections = []
-            if confirmed:
-                details_sections.append(f'<div class="section"><h4>Confirmed Emails</h4><ul>{make_list(confirmed, "email")}</ul></div>')
-            if potential:
-                details_sections.append(f'<div class="section"><h4>Potential Emails</h4><ul>{make_list(potential, "email potential")}</ul></div>')
-            if phones:
-                details_sections.append(f'<div class="section"><h4>Phones</h4><ul>{make_list(phones)}</ul></div>')
-            if websites:
-                links = ''.join(f'<li><a href="{self._html_escape(w)}" target="_blank">{self._html_escape(w)}</a></li>' for w in websites)
-                details_sections.append(f'<div class="section"><h4>Websites</h4><ul>{links}</ul></div>')
-            if githubs:
-                links = ''.join(f'<li><a href="{self._html_escape(g)}" target="_blank">{self._html_escape(g)}</a></li>' for g in githubs)
-                details_sections.append(f'<div class="section"><h4>GitHub</h4><ul>{links}</ul></div>')
-            if twitters:
-                links = ''.join(f'<li><a href="{self._html_escape(t)}" target="_blank">{self._html_escape(t)}</a></li>' for t in twitters)
-                details_sections.append(f'<div class="section"><h4>Twitter</h4><ul>{links}</ul></div>')
-            if breaches:
-                details_sections.append(f'<div class="section breach"><h4>Breaches</h4><ul>{make_list(breaches, "breach")}</ul></div>')
-            if passwords:
-                details_sections.append(f'<div class="section breach"><h4>Leaked Passwords</h4><ul>{make_list(passwords, "password")}</ul></div>')
-            if secrets:
-                details_sections.append(f'<div class="section breach"><h4>Secrets in Repos</h4><ul>{make_list(secrets, "secret")}</ul></div>')
+        cur.execute("""
+            SELECT username, password, breach_context
+            FROM username_passwords WHERE company_id = ?
+        """, (self.company_id,))
+        username_creds = [{'username': r['username'], 'password': r['password'], 'context': r['breach_context'] or ''} for r in cur.fetchall()]
 
-            details_html = ''.join(details_sections) if details_sections else '<p class="no-data">No additional data found.</p>'
-            photo_html = f'<img src="{self._html_escape(photo)}" alt="{self._html_escape(name)}" />' if photo else '<div class="no-photo">No Photo</div>'
+        total_emp = len(emp_data)
+        total_emails = sum(1 for e in emp_data if e['confirmed'] or e['potential'])
+        total_breaches = len(all_breaches)
+        total_email_creds = len(all_email_creds)
+        total_user_creds = len(username_creds)
+        total_secrets = len(all_secrets)
+        unique_breach_names = len(set(b['breach'] for b in all_breaches))
+        dept_set = sorted(set(e['dept'] for e in emp_data if e['dept']))
 
-            tags_html = ''
-            if dept:
-                tags_html += f'<span class="tag dept">{self._html_escape(dept)}</span>'
-            if confirmed:
-                tags_html += '<span class="tag confirmed">Email</span>'
-                card_count_with_email += 1
-            if breaches:
-                tags_html += '<span class="tag breached">Breached</span>'
-                card_count_breached += 1
-            if passwords:
-                tags_html += '<span class="tag leaked">Passwords</span>'
-            if githubs:
-                tags_html += '<span class="tag github">GitHub</span>'
-            if secrets:
-                tags_html += '<span class="tag secrets">Secrets</span>'
+        # --- Tab 1: Overview ---
+        findings_html = ''
+        if all_email_creds or username_creds:
+            findings_html += f'''<div class="finding finding-critical">
+                <div class="finding-icon">!</div>
+                <div><div class="finding-title">{total_email_creds + total_user_creds} leaked credentials found</div>
+                <div class="finding-desc">{total_email_creds} matched by email, {total_user_creds} matched by username across ClickHouse leak database.</div></div></div>'''
+        if all_secrets:
+            findings_html += f'''<div class="finding finding-high">
+                <div class="finding-icon">!</div>
+                <div><div class="finding-title">{total_secrets} secrets exposed in repositories</div>
+                <div class="finding-desc">Secrets found via gitleaks scan in employee GitHub/GitLab repositories.</div></div></div>'''
+        if all_breaches:
+            findings_html += f'''<div class="finding finding-medium">
+                <div class="finding-icon">i</div>
+                <div><div class="finding-title">{total_breaches} breach records across {unique_breach_names} known breaches</div>
+                <div class="finding-desc">Employee emails found in public data breaches via HaveIBeenPwned.</div></div></div>'''
+        if not findings_html:
+            findings_html = '<p class="empty-state">No critical findings yet. Run find_passwords, find_breaches, or find_secrets to populate this section.</p>'
 
-            card = f'''
-            <div class="card" data-name="{self._html_escape(name.lower())}" data-role="{self._html_escape(title.lower())}" data-dept="{self._html_escape((dept or '').lower())}">
-                <div class="card-header">
-                    <div class="photo">{photo_html}</div>
-                    <div class="info">
-                        <h3>{self._html_escape(name)}</h3>
-                        <p class="role">{self._html_escape(title)}</p>
-                        <div class="tags">{tags_html}</div>
+        overview_tab = f'''<div class="tab-pane active" id="tab-overview">
+            <div class="metrics-grid">
+                <div class="metric-card"><div class="metric-value">{total_emp}</div><div class="metric-label">Employees</div></div>
+                <div class="metric-card"><div class="metric-value">{total_emails}</div><div class="metric-label">With Emails</div></div>
+                <div class="metric-card accent-red"><div class="metric-value">{total_breaches}</div><div class="metric-label">Breach Records</div></div>
+                <div class="metric-card accent-orange"><div class="metric-value">{total_email_creds + total_user_creds}</div><div class="metric-label">Leaked Credentials</div></div>
+                <div class="metric-card accent-purple"><div class="metric-value">{total_secrets}</div><div class="metric-label">Secrets Found</div></div>
+                {'<div class="metric-card accent-cyan"><div class="metric-value">' + str(len(dept_set)) + '</div><div class="metric-label">Departments</div></div>' if dept_set else ''}
+            </div>
+            <div class="panel">
+                <h2 class="panel-title">Key Findings</h2>
+                <div class="findings-list">{findings_html}</div>
+            </div>
+        </div>'''
+
+        # --- Tab 2: Profiling ---
+        cards_by_dept = {}
+        for e in emp_data:
+            dept_key = e['dept'] or '_ungrouped'
+            photo_html = f'<img src="{esc(e["photo"])}" alt="{esc(e["name"])}" />' if e['photo'] else '<div class="no-photo"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#484f58" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-7 8-7s8 3 8 7"/></svg></div>'
+
+            contact_items = ''
+            for em in e['confirmed']:
+                contact_items += f'<li class="contact-email"><span class="contact-label">Email</span><span class="contact-value confirmed">{esc(em)}</span></li>'
+            for em in e['potential']:
+                contact_items += f'<li class="contact-email"><span class="contact-label">Potential</span><span class="contact-value potential">{esc(em)}</span></li>'
+            for ph in e['phones']:
+                contact_items += f'<li><span class="contact-label">Phone</span><span class="contact-value">{esc(ph)}</span></li>'
+            for w in e['websites']:
+                contact_items += f'<li><span class="contact-label">Web</span><a href="{esc(w)}" target="_blank" class="contact-value link">{esc(w)}</a></li>'
+            for g in e['githubs']:
+                contact_items += f'<li><span class="contact-label">GitHub</span><a href="{esc(g)}" target="_blank" class="contact-value link github-link">{esc(g)}</a></li>'
+            for t in e['twitters']:
+                contact_items += f'<li><span class="contact-label">Twitter</span><a href="{esc(t)}" target="_blank" class="contact-value link">{esc(t)}</a></li>'
+
+            indicators = ''
+            if e['has_breaches']:
+                indicators += '<span class="indicator ind-breach" title="Breached">B</span>'
+            if e['has_passwords']:
+                indicators += '<span class="indicator ind-cred" title="Leaked credentials">C</span>'
+            if e['has_secrets']:
+                indicators += '<span class="indicator ind-secret" title="Secrets in repos">S</span>'
+
+            card = f'''<div class="profile-card" data-name="{esc(e['name'].lower())}" data-role="{esc(e['title'].lower())}" data-dept="{esc(e['dept'].lower())}">
+                <div class="profile-header">
+                    <div class="profile-photo">{photo_html}</div>
+                    <div class="profile-info">
+                        <h3>{esc(e['name'])}</h3>
+                        <p class="profile-role">{esc(e['title'])}</p>
+                        {f'<span class="dept-tag">{esc(e["dept"])}</span>' if e['dept'] else ''}
                     </div>
+                    <div class="profile-indicators">{indicators}</div>
                 </div>
-                <div class="card-details">{details_html}</div>
+                {'<ul class="contact-list">' + contact_items + '</ul>' if contact_items else '<p class="empty-state small">No contact information found.</p>'}
             </div>'''
-
-            dept_key = dept or '_ungrouped'
             cards_by_dept.setdefault(dept_key, []).append(card)
-
-        total = len(employees)
 
         if use_ai and role_to_dept:
             sorted_depts = sorted(d for d in cards_by_dept if d != '_ungrouped')
             if '_ungrouped' in cards_by_dept:
                 sorted_depts.append('_ungrouped')
-            
-            dept_count = len([d for d in sorted_depts if d != '_ungrouped'])
-            
-            dept_nav_items = []
+            dept_buttons = '<button class="dept-filter active" data-dept="all">All</button>'
             for d in sorted_depts:
                 label = d if d != '_ungrouped' else 'Uncategorized'
-                count = len(cards_by_dept[d])
-                dept_nav_items.append(
-                    f'<button class="dept-btn" data-dept="{self._html_escape(d.lower())}">'
-                    f'{self._html_escape(label)} <span class="dept-count">{count}</span></button>'
-                )
-            dept_nav_items.insert(0,
-                '<button class="dept-btn active" data-dept="all">'
-                f'All <span class="dept-count">{total}</span></button>'
-            )
-            dept_nav = f'<div class="dept-nav">{"".join(dept_nav_items)}</div>'
-
-            grid_content = ''
+                dept_buttons += f'<button class="dept-filter" data-dept="{esc(d.lower())}">{esc(label)} ({len(cards_by_dept[d])})</button>'
+            dept_filter_bar = f'<div class="dept-filter-bar">{dept_buttons}</div>'
+            profiling_grid = ''
             for d in sorted_depts:
                 label = d if d != '_ungrouped' else 'Uncategorized'
-                grid_content += f'<div class="dept-section" data-dept-section="{self._html_escape(d.lower())}">'
-                grid_content += f'<h2 class="dept-title">{self._html_escape(label)} <span class="dept-badge">{len(cards_by_dept[d])}</span></h2>'
-                grid_content += f'<div class="grid">{"".join(cards_by_dept[d])}</div>'
-                grid_content += '</div>'
+                profiling_grid += f'<div class="dept-group" data-dept-group="{esc(d.lower())}"><h3 class="dept-group-title">{esc(label)}<span class="badge">{len(cards_by_dept[d])}</span></h3><div class="profiles-grid">{"".join(cards_by_dept[d])}</div></div>'
         else:
-            dept_nav = ''
-            dept_count = 0
+            dept_filter_bar = ''
             all_cards = []
             for cards in cards_by_dept.values():
                 all_cards.extend(cards)
-            grid_content = f'<div class="grid" id="grid">{"".join(all_cards)}</div>'
+            profiling_grid = f'<div class="profiles-grid">{"".join(all_cards)}</div>'
 
-        dept_stat = f'<div class="stat"><div class="num">{dept_count}</div><div class="label">Departments</div></div>' if use_ai and role_to_dept else ''
+        profiling_tab = f'''<div class="tab-pane" id="tab-profiling">
+            <div class="tab-toolbar">
+                <input type="text" class="search-input" id="profiling-search" placeholder="Search by name, role or department..." />
+                {dept_filter_bar}
+            </div>
+            <div id="profiling-content">{profiling_grid}</div>
+        </div>'''
+
+        # --- Tab 3: Breaches ---
+        if all_breaches:
+            breach_rows = ''
+            for b in sorted(all_breaches, key=lambda x: x['breach']):
+                breach_rows += f'<tr><td>{esc(b["name"])}</td><td class="mono">{esc(b["email"])}</td><td>{esc(b["breach"])}</td><td>{esc(b["date"])}</td></tr>'
+            breaches_table = f'''<div class="panel"><h2 class="panel-title">Breach Records <span class="badge">{total_breaches}</span></h2>
+                <div class="table-toolbar"><input type="text" class="search-input" id="breach-search" placeholder="Filter breaches..." /></div>
+                <div class="table-wrap"><table class="data-table" id="breach-table">
+                <thead><tr><th>Employee</th><th>Email</th><th>Breach</th><th>Date</th></tr></thead>
+                <tbody>{breach_rows}</tbody></table></div></div>'''
+        else:
+            breaches_table = '<div class="panel"><p class="empty-state">No breach records found. Use the HIBP plugin with find_breaches to check employee emails.</p></div>'
+
+        breaches_tab = f'<div class="tab-pane" id="tab-breaches">{breaches_table}</div>'
+
+        # --- Tab 4: Credentials ---
+        if all_email_creds:
+            cred_rows = ''
+            for c in all_email_creds:
+                type_class = 'confirmed' if c['type'] == 'confirmed' else 'potential'
+                cred_rows += f'<tr><td>{esc(c["name"])}</td><td class="mono {type_class}">{esc(c["identifier"])}</td><td class="mono pwd">{esc(c["password"])}</td><td class="ctx">{esc(c["context"])}</td></tr>'
+            email_creds_html = f'''<div class="panel"><h2 class="panel-title">Credentials by Email <span class="badge">{total_email_creds}</span></h2>
+                <div class="table-toolbar"><input type="text" class="search-input" id="cred-email-search" placeholder="Filter by email, employee..." /></div>
+                <div class="table-wrap"><table class="data-table" id="cred-email-table">
+                <thead><tr><th>Employee</th><th>Email</th><th>Password</th><th>Leak Source</th></tr></thead>
+                <tbody>{cred_rows}</tbody></table></div></div>'''
+        else:
+            email_creds_html = '<div class="panel"><p class="empty-state">No email-based credentials found. Use find_passwords only_emails or find_all.</p></div>'
+
+        if username_creds:
+            user_rows = ''
+            for c in username_creds:
+                user_rows += f'<tr><td class="mono">{esc(c["username"])}</td><td class="mono pwd">{esc(c["password"])}</td><td class="ctx">{esc(c["context"])}</td></tr>'
+            user_creds_html = f'''<div class="panel"><h2 class="panel-title">Credentials by Username <span class="badge">{total_user_creds}</span></h2>
+                <p class="panel-desc">Found by searching usernames (without domain) across the ClickHouse leak database. May include false positives for common usernames.</p>
+                <div class="table-toolbar"><input type="text" class="search-input" id="cred-user-search" placeholder="Filter by username..." /></div>
+                <div class="table-wrap"><table class="data-table" id="cred-user-table">
+                <thead><tr><th>Username</th><th>Password</th><th>Leak Source</th></tr></thead>
+                <tbody>{user_rows}</tbody></table></div></div>'''
+        else:
+            user_creds_html = '<div class="panel"><p class="empty-state">No username-based credentials found. Use find_passwords only_usernames or find_all.</p></div>'
+
+        credentials_tab = f'<div class="tab-pane" id="tab-credentials">{email_creds_html}{user_creds_html}</div>'
+
+        # --- Tab 5: Secrets ---
+        if all_secrets:
+            secret_rows = ''
+            for s in all_secrets:
+                truncated = s['value'][:60] + '...' if len(s['value']) > 60 else s['value']
+                repo_name = s['repo'].split('/')[-1] if '/' in s['repo'] else s['repo']
+                secret_rows += f'<tr><td>{esc(s["name"])}</td><td><span class="secret-type">{esc(s["type"])}</span></td><td class="mono pwd">{esc(truncated)}</td><td><a href="{esc(s["repo"])}" target="_blank" class="link">{esc(repo_name)}</a></td><td class="mono ctx">{esc(s["file"])}</td></tr>'
+            secrets_html = f'''<div class="panel"><h2 class="panel-title">Exposed Secrets <span class="badge">{total_secrets}</span></h2>
+                <div class="table-toolbar"><input type="text" class="search-input" id="secrets-search" placeholder="Filter secrets..." /></div>
+                <div class="table-wrap"><table class="data-table" id="secrets-table">
+                <thead><tr><th>Employee</th><th>Type</th><th>Value</th><th>Repository</th><th>File</th></tr></thead>
+                <tbody>{secret_rows}</tbody></table></div></div>'''
+        else:
+            secrets_html = '<div class="panel"><p class="empty-state">No secrets found. Use the GitHub plugin with run find_secrets to scan employee repositories.</p></div>'
+
+        secrets_tab = f'<div class="tab-pane" id="tab-secrets">{secrets_html}</div>'
+
+        ai_subtitle = ' | AI-grouped by department' if use_ai and role_to_dept else ''
 
         html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EmploLeaks Report - {self._html_escape(self.company_name)}</title>
+<title>EmploLeaks Report &mdash; {esc(self.company_name)}</title>
 <style>
-* {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }}
-.header {{ background: linear-gradient(135deg, #161b22 0%, #1a1e2e 100%); padding: 30px 40px; border-bottom: 1px solid #30363d; }}
-.header h1 {{ font-size: 28px; color: #f0f6fc; margin-bottom: 5px; }}
-.header h1 span {{ color: #f85149; }}
-.header .subtitle {{ color: #8b949e; font-size: 14px; }}
-.stats {{ display: flex; gap: 20px; margin-top: 15px; flex-wrap: wrap; }}
-.stat {{ background: #21262d; padding: 10px 18px; border-radius: 8px; border: 1px solid #30363d; }}
-.stat .num {{ font-size: 22px; font-weight: 700; color: #58a6ff; }}
-.stat .label {{ font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }}
-.controls {{ padding: 20px 40px; background: #161b22; border-bottom: 1px solid #30363d; }}
-.search {{ width: 100%; padding: 10px 16px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; font-size: 14px; outline: none; }}
-.search:focus {{ border-color: #58a6ff; }}
-.dept-nav {{ padding: 16px 40px; background: #0d1117; border-bottom: 1px solid #30363d; display: flex; gap: 8px; flex-wrap: wrap; }}
-.dept-btn {{ background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }}
-.dept-btn:hover {{ border-color: #58a6ff; color: #f0f6fc; }}
-.dept-btn.active {{ background: #1f6feb; border-color: #1f6feb; color: #fff; }}
-.dept-count {{ background: rgba(255,255,255,0.15); padding: 1px 7px; border-radius: 10px; font-size: 11px; }}
-.dept-section {{ margin-bottom: 8px; }}
-.dept-title {{ font-size: 20px; color: #f0f6fc; padding: 20px 40px 8px; display: flex; align-items: center; gap: 10px; }}
-.dept-badge {{ background: #1f6feb; color: #fff; font-size: 13px; padding: 2px 10px; border-radius: 12px; font-weight: 600; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; padding: 12px 40px 24px; }}
-.card {{ background: #161b22; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; transition: border-color 0.2s; }}
-.card:hover {{ border-color: #58a6ff; }}
-.card-header {{ display: flex; gap: 16px; padding: 20px; cursor: pointer; }}
-.photo img {{ width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 2px solid #30363d; }}
-.no-photo {{ width: 64px; height: 64px; border-radius: 50%; background: #21262d; border: 2px solid #30363d; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #484f58; }}
-.info {{ flex: 1; min-width: 0; }}
-.info h3 {{ font-size: 16px; color: #f0f6fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.info .role {{ font-size: 13px; color: #8b949e; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.tags {{ margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }}
-.tag {{ padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
-.tag.dept {{ background: #272d38; color: #a5d6ff; border: 1px solid #384860; }}
-.tag.confirmed {{ background: #0d419d; color: #79c0ff; }}
-.tag.breached {{ background: #6e3226; color: #f85149; }}
-.tag.leaked {{ background: #5a3000; color: #f0883e; }}
-.tag.github {{ background: #1b3a2d; color: #56d364; }}
-.tag.secrets {{ background: #5a1a5e; color: #d2a8ff; }}
-.card-details {{ display: none; padding: 0 20px 20px; border-top: 1px solid #21262d; }}
-.card.open .card-details {{ display: block; padding-top: 16px; }}
-.section {{ margin-bottom: 12px; }}
-.section h4 {{ font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }}
-.section ul {{ list-style: none; }}
-.section li {{ font-size: 13px; padding: 3px 0; color: #c9d1d9; word-break: break-all; }}
-.section li.breach {{ color: #f85149; }}
-.section li.password {{ color: #f0883e; font-family: monospace; }}
-.section li.secret {{ color: #d2a8ff; font-family: monospace; font-size: 12px; }}
-.section li.email {{ color: #79c0ff; }}
-.section li.potential {{ color: #8b949e; font-style: italic; }}
-.section a {{ color: #58a6ff; text-decoration: none; }}
-.section a:hover {{ text-decoration: underline; }}
-.no-data {{ color: #484f58; font-size: 13px; font-style: italic; }}
-.hidden {{ display: none !important; }}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}}
+a{{color:#58a6ff;text-decoration:none}}a:hover{{text-decoration:underline}}
+.mono{{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:12px}}
+
+/* Header */
+.header{{background:linear-gradient(135deg,#161b22 0%,#1a1e2e 100%);padding:28px 40px;border-bottom:1px solid #30363d}}
+.header h1{{font-size:26px;color:#f0f6fc;letter-spacing:-0.3px}}.header h1 span{{color:#f85149}}
+.header .sub{{color:#8b949e;font-size:13px;margin-top:4px}}
+
+/* Tab nav */
+.tab-nav{{display:flex;gap:0;background:#161b22;border-bottom:2px solid #30363d;padding:0 40px;overflow-x:auto}}
+.tab-btn{{padding:12px 20px;color:#8b949e;font-size:13px;font-weight:600;cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;white-space:nowrap;display:flex;align-items:center;gap:6px}}
+.tab-btn:hover{{color:#c9d1d9}}.tab-btn.active{{color:#f0f6fc;border-bottom-color:#58a6ff}}
+.tab-btn .cnt{{background:#30363d;color:#8b949e;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600}}
+.tab-btn.active .cnt{{background:#1f6feb;color:#fff}}
+
+/* Tab panes */
+.tab-pane{{display:none;padding:24px 40px}}.tab-pane.active{{display:block}}
+
+/* Metrics grid */
+.metrics-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px}}
+.metric-card{{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:20px;text-align:center}}
+.metric-value{{font-size:32px;font-weight:700;color:#58a6ff;line-height:1}}.metric-label{{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-top:6px}}
+.accent-red .metric-value{{color:#f85149}}.accent-orange .metric-value{{color:#f0883e}}.accent-purple .metric-value{{color:#d2a8ff}}.accent-cyan .metric-value{{color:#79c0ff}}
+
+/* Findings */
+.findings-list{{display:flex;flex-direction:column;gap:10px}}
+.finding{{display:flex;gap:14px;padding:14px 18px;border-radius:8px;align-items:flex-start;background:#161b22;border:1px solid #30363d}}
+.finding-icon{{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}}
+.finding-critical .finding-icon{{background:#f851491a;color:#f85149;border:1px solid #f8514933}}
+.finding-high .finding-icon{{background:#d2a8ff1a;color:#d2a8ff;border:1px solid #d2a8ff33}}
+.finding-medium .finding-icon{{background:#f0883e1a;color:#f0883e;border:1px solid #f0883e33}}
+.finding-title{{color:#f0f6fc;font-weight:600;font-size:14px}}.finding-desc{{color:#8b949e;font-size:13px;margin-top:2px}}
+
+/* Panels */
+.panel{{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:24px;margin-bottom:20px}}
+.panel-title{{font-size:16px;color:#f0f6fc;margin-bottom:16px;display:flex;align-items:center;gap:8px}}
+.panel-desc{{color:#8b949e;font-size:13px;margin-bottom:16px;font-style:italic}}
+.badge{{background:#1f6feb;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}}
+
+/* Tables */
+.table-toolbar{{margin-bottom:12px}}.table-wrap{{overflow-x:auto}}
+.data-table{{width:100%;border-collapse:collapse;font-size:13px}}
+.data-table th{{text-align:left;padding:10px 12px;background:#21262d;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #30363d;position:sticky;top:0;cursor:pointer;user-select:none;white-space:nowrap}}
+.data-table th:hover{{color:#c9d1d9}}
+.data-table th .sort-arrow{{margin-left:4px;opacity:.4;font-size:10px}}
+.data-table th.sorted .sort-arrow{{opacity:1}}
+.data-table td{{padding:8px 12px;border-bottom:1px solid #21262d;vertical-align:top;word-break:break-all}}
+.data-table tbody tr:hover{{background:#1c2128}}
+.data-table .confirmed{{color:#79c0ff}}.data-table .potential{{color:#8b949e;font-style:italic}}
+.data-table .pwd{{color:#f0883e}}.data-table .ctx{{color:#6e7681;font-size:12px}}
+.secret-type{{background:#5a1a5e;color:#d2a8ff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}}
+
+/* Search inputs */
+.search-input{{width:100%;max-width:400px;padding:8px 14px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;outline:none}}
+.search-input:focus{{border-color:#58a6ff}}
+.tab-toolbar{{margin-bottom:20px;display:flex;flex-direction:column;gap:12px}}
+
+/* Profile cards */
+.profiles-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}}
+.profile-card{{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px;transition:border-color .15s}}
+.profile-card:hover{{border-color:#484f58}}
+.profile-header{{display:flex;gap:14px;align-items:center;margin-bottom:12px}}
+.profile-photo img{{width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #30363d}}
+.no-photo{{width:52px;height:52px;border-radius:50%;background:#21262d;border:2px solid #30363d;display:flex;align-items:center;justify-content:center}}
+.profile-info{{flex:1;min-width:0}}
+.profile-info h3{{font-size:15px;color:#f0f6fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.profile-role{{font-size:12px;color:#8b949e;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.dept-tag{{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#272d38;color:#a5d6ff;border:1px solid #384860}}
+.profile-indicators{{display:flex;gap:4px}}
+.indicator{{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}}
+.ind-breach{{background:#6e32261a;color:#f85149;border:1px solid #f8514944}}
+.ind-cred{{background:#5a30001a;color:#f0883e;border:1px solid #f0883e44}}
+.ind-secret{{background:#5a1a5e1a;color:#d2a8ff;border:1px solid #d2a8ff44}}
+.contact-list{{list-style:none;display:flex;flex-direction:column;gap:4px}}
+.contact-list li{{display:flex;gap:8px;font-size:12px;align-items:baseline}}
+.contact-label{{color:#6e7681;min-width:55px;text-transform:uppercase;font-size:10px;font-weight:600;letter-spacing:.3px;flex-shrink:0;padding-top:1px}}
+.contact-value{{word-break:break-all}}.contact-value.confirmed{{color:#79c0ff}}.contact-value.potential{{color:#8b949e;font-style:italic}}.contact-value.link{{color:#58a6ff}}
+.contact-value.github-link{{color:#56d364}}
+
+/* Dept groups */
+.dept-group{{margin-bottom:24px}}
+.dept-group-title{{font-size:17px;color:#f0f6fc;margin-bottom:12px;display:flex;align-items:center;gap:8px}}
+.dept-filter-bar{{display:flex;gap:6px;flex-wrap:wrap}}
+.dept-filter{{padding:5px 12px;border-radius:16px;font-size:12px;cursor:pointer;background:#21262d;border:1px solid #30363d;color:#c9d1d9;transition:all .15s}}
+.dept-filter:hover{{border-color:#58a6ff;color:#f0f6fc}}.dept-filter.active{{background:#1f6feb;border-color:#1f6feb;color:#fff}}
+
+/* Misc */
+.empty-state{{color:#484f58;font-size:14px;text-align:center;padding:40px 20px;font-style:italic}}
+.empty-state.small{{font-size:12px;padding:8px 0;text-align:left}}
+.hidden{{display:none!important}}
+@media(max-width:600px){{.tab-pane{{padding:16px}}.profiles-grid{{grid-template-columns:1fr}}.header{{padding:20px}}.tab-nav{{padding:0 16px}}}}
 </style>
 </head>
 <body>
 <div class="header">
-    <h1><span>emploleaks</span> // {self._html_escape(self.company_name)}</h1>
-    <p class="subtitle">Generated {time.strftime("%Y-%m-%d %H:%M:%S")}{' | AI-grouped by department' if use_ai and role_to_dept else ''}</p>
-    <div class="stats">
-        <div class="stat"><div class="num">{total}</div><div class="label">Employees</div></div>
-        {dept_stat}
-        <div class="stat"><div class="num">{card_count_with_email}</div><div class="label">With Email</div></div>
-        <div class="stat"><div class="num">{card_count_breached}</div><div class="label">Breached</div></div>
-    </div>
+    <h1><span>emploleaks</span> // {esc(self.company_name)}</h1>
+    <p class="sub">Generated {time.strftime("%Y-%m-%d %H:%M:%S")}{ai_subtitle}</p>
 </div>
-<div class="controls">
-    <input type="text" class="search" placeholder="Filter by name, role or department..." id="search" />
-</div>
-{dept_nav}
-<div id="content">
-{grid_content}
-</div>
+<nav class="tab-nav">
+    <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+    <button class="tab-btn" data-tab="tab-profiling">Profiling <span class="cnt">{total_emp}</span></button>
+    <button class="tab-btn" data-tab="tab-breaches">Data Breaches <span class="cnt">{total_breaches}</span></button>
+    <button class="tab-btn" data-tab="tab-credentials">Credentials <span class="cnt">{total_email_creds + total_user_creds}</span></button>
+    <button class="tab-btn" data-tab="tab-secrets">Secrets <span class="cnt">{total_secrets}</span></button>
+</nav>
+{overview_tab}
+{profiling_tab}
+{breaches_tab}
+{credentials_tab}
+{secrets_tab}
 <script>
-document.querySelectorAll('.card-header').forEach(h => {{
-    h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
-}});
-const searchInput = document.getElementById('search');
-searchInput.addEventListener('input', e => {{
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll('.card').forEach(c => {{
-        const match = c.dataset.name.includes(q) || c.dataset.role.includes(q) || (c.dataset.dept && c.dataset.dept.includes(q));
-        c.classList.toggle('hidden', !match);
-    }});
-    document.querySelectorAll('.dept-section').forEach(s => {{
-        const visible = s.querySelectorAll('.card:not(.hidden)').length;
-        s.classList.toggle('hidden', visible === 0);
-    }});
-}});
-document.querySelectorAll('.dept-btn').forEach(btn => {{
+/* Tab switching */
+document.querySelectorAll('.tab-btn').forEach(btn => {{
     btn.addEventListener('click', () => {{
-        document.querySelectorAll('.dept-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+    }});
+}});
+
+/* Generic table search */
+function setupTableSearch(inputId, tableId) {{
+    const input = document.getElementById(inputId);
+    const table = document.getElementById(tableId);
+    if (!input || !table) return;
+    input.addEventListener('input', () => {{
+        const q = input.value.toLowerCase();
+        table.querySelectorAll('tbody tr').forEach(row => {{
+            row.classList.toggle('hidden', q && !row.textContent.toLowerCase().includes(q));
+        }});
+    }});
+}}
+setupTableSearch('breach-search', 'breach-table');
+setupTableSearch('cred-email-search', 'cred-email-table');
+setupTableSearch('cred-user-search', 'cred-user-table');
+setupTableSearch('secrets-search', 'secrets-table');
+
+/* Profiling search */
+const profSearch = document.getElementById('profiling-search');
+if (profSearch) {{
+    profSearch.addEventListener('input', () => {{
+        const q = profSearch.value.toLowerCase();
+        document.querySelectorAll('.profile-card').forEach(c => {{
+            const match = !q || c.dataset.name.includes(q) || c.dataset.role.includes(q) || c.dataset.dept.includes(q);
+            c.classList.toggle('hidden', !match);
+        }});
+        document.querySelectorAll('.dept-group').forEach(g => {{
+            const has = g.querySelectorAll('.profile-card:not(.hidden)').length > 0;
+            g.classList.toggle('hidden', !has);
+        }});
+    }});
+}}
+
+/* Dept filter */
+document.querySelectorAll('.dept-filter').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+        document.querySelectorAll('.dept-filter').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const dept = btn.dataset.dept;
-        if (dept === 'all') {{
-            document.querySelectorAll('.dept-section').forEach(s => s.classList.remove('hidden'));
-        }} else {{
-            document.querySelectorAll('.dept-section').forEach(s => {{
-                s.classList.toggle('hidden', s.dataset.deptSection !== dept);
-            }});
-        }}
-        searchInput.value = '';
-        document.querySelectorAll('.card').forEach(c => c.classList.remove('hidden'));
+        document.querySelectorAll('.dept-group').forEach(g => {{
+            g.classList.toggle('hidden', dept !== 'all' && g.dataset.deptGroup !== dept);
+        }});
+    }});
+}});
+
+/* Column sorting */
+document.querySelectorAll('.data-table th').forEach(th => {{
+    th.innerHTML += ' <span class="sort-arrow">&#9650;</span>';
+    th.addEventListener('click', () => {{
+        const table = th.closest('table');
+        const idx = Array.from(th.parentNode.children).indexOf(th);
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const asc = !th.classList.contains('sorted-asc');
+        table.querySelectorAll('th').forEach(h => {{ h.classList.remove('sorted','sorted-asc','sorted-desc'); }});
+        th.classList.add('sorted', asc ? 'sorted-asc' : 'sorted-desc');
+        th.querySelector('.sort-arrow').innerHTML = asc ? '&#9650;' : '&#9660;';
+        rows.sort((a, b) => {{
+            const av = a.children[idx]?.textContent || '';
+            const bv = b.children[idx]?.textContent || '';
+            return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+        }});
+        rows.forEach(r => tbody.appendChild(r));
     }});
 }});
 </script>
@@ -2009,17 +2233,9 @@ document.querySelectorAll('.dept-btn').forEach(btn => {{
                     password String,
                     uri_subdomain String,
                     uri_domain String,
-                    uri_tld String,
-                    -- Add a materialized column for the full email
-                    mail_full String MATERIALIZED concat(mail_username, '@', mail_domain, '.', mail_tld),
-                    -- Add a materialized column for the full URI
-                    uri_full String MATERIALIZED concat(
-                        if(uri_subdomain != '', concat(uri_subdomain, '.'), ''),
-                        uri_domain, '.', uri_tld
-                    )
-                ) ENGINE = MergeTree()
-                ORDER BY (mail_username, mail_domain, mail_tld)
-                -- Add secondary indexes for common queries
+                    uri_tld String
+                ) ENGINE = ReplacingMergeTree()
+                ORDER BY (mail_username, mail_domain, mail_tld, password, uri_subdomain, uri_domain, uri_tld)
                 SETTINGS index_granularity = 8192
             ''')
             log.info("Credentials table created successfully")
@@ -2218,24 +2434,44 @@ with this command again, pointing to a directory containing credential files.
 
     @cmd2.with_argparser(parser_connect_leaks)
     def do_connect_leaks(self, args):
-        """Connect to the leaks database
-        Usage: connect_leaks --user <username> --passwd <password> --dbname <database> --host <hostname> [--port <port>] [--secure]
+        """Connect to the ClickHouse leaks database.
+
+        Without arguments, uses saved config from tokens.ini.
+        Use --save to persist connection settings for future sessions.
+
+        Examples:
+            connect_leaks
+            connect_leaks --host 192.168.1.10 --dbname my_leaks --save
         """
+        host = args.host or self.ch_host
+        port = args.port or self.ch_port
+        user = args.user or self.ch_user
+        passwd = args.passwd if args.passwd is not None else self.ch_passwd
+        dbname = args.dbname or self.ch_dbname
+
         try:
-            # Intentar conectar a la base de datos ClickHouse
             self.leaks_conn = clickhouse_driver.Client(
-                host=args.host,
-                port=int(args.port),
-                database=args.dbname,
-                user=args.user,
-                password=args.passwd,
+                host=host,
+                port=int(port),
+                user=user,
+                password=passwd,
                 secure=args.secure
             )
-            # Test the connection
             self.leaks_conn.execute('SELECT 1')
-            log.info(f"[+] Successfully connected to ClickHouse database {args.dbname} on {args.host}:{args.port}")
+            self.ch_host, self.ch_port = host, port
+            self.ch_user, self.ch_passwd, self.ch_dbname = user, passwd, dbname
+            self._ensure_credentials_db()
+            log.info(f"Connected to ClickHouse {dbname} on {host}:{port}")
+
+            if args.save:
+                self._save_config_section('clickhouse', {
+                    'host': host, 'port': port, 'user': user,
+                    'passwd': passwd, 'dbname': dbname,
+                })
+                log.info("Connection settings saved to config")
+
         except Exception as e:
-            log.error(f"[!] Error connecting to ClickHouse database: {str(e)}")
+            log.error(f"Error connecting to ClickHouse: {str(e)}")
             self.leaks_conn = None
 
     @leaksdb_connected
@@ -2252,6 +2488,100 @@ with this command again, pointing to a directory containing credential files.
             log.info("[+] Disconnected from leaks database")
         else:
             log.warning("[!] Not connected to any database")
+
+    @cmd2.with_argparser(parser_import_leaks)
+    def do_import_leaks(self, args):
+        """Import credential leak files into ClickHouse.
+
+        Scans a directory for leak files (txt, csv, dat, zip, gz), auto-detects
+        their format, and inserts parsed credentials into the ClickHouse database.
+
+        Examples:
+            import_leaks
+            import_leaks /path/to/my/leaks
+            import_leaks --no-ai
+        """
+        if not self.leaks_conn:
+            log.warning("No ClickHouse connection. Run 'connect_leaks' first or configure in tokens.ini.")
+            return
+
+        base_dir = args.directory or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'leaks_data')
+        if not os.path.isdir(base_dir):
+            log.error(f"Directory not found: {base_dir}")
+            return
+
+        use_ai = not args.no_ai
+        ai_endpoint = self.ai_endpoint if use_ai else None
+        ai_key = self.ai_key if use_ai else None
+        ai_model = self.ai_model if use_ai else None
+
+        files = list(iter_leak_files(base_dir))
+        if not files:
+            log.warning(f"No parseable files found in {base_dir}")
+            return
+
+        log.info(f"Found {len(files)} file(s) to process in {base_dir}")
+        total_inserted = 0
+        total_skipped = 0
+        batch_size = 50000
+
+        spinner = Halo(text='Importing credentials...', spinner='dots')
+        spinner.start()
+
+        for file_idx, fpath in enumerate(files, 1):
+            fname = os.path.basename(fpath)
+            spinner.text = f'Processing file {file_idx}/{len(files)}: {fname}'
+            log.info(f"[{file_idx}/{len(files)}] Parsing: {fname}")
+
+            batch = []
+            file_count = 0
+            try:
+                for record in parse_file(fpath, ai_endpoint, ai_key, ai_model):
+                    batch.append(record)
+                    if len(batch) >= batch_size:
+                        self._insert_credentials_batch(batch)
+                        file_count += len(batch)
+                        spinner.text = f'File {file_idx}/{len(files)}: {fname} — {file_count:,} rows...'
+                        batch = []
+
+                if batch:
+                    self._insert_credentials_batch(batch)
+                    file_count += len(batch)
+
+                total_inserted += file_count
+                if file_count > 0:
+                    log.info(f"  Imported {file_count:,} credentials from {fname}")
+                else:
+                    total_skipped += 1
+
+            except Exception as e:
+                log.error(f"  Error processing {fname}: {e}")
+                total_skipped += 1
+
+        spinner.stop()
+
+        if total_inserted > 0:
+            log.info("Deduplicating credentials...")
+            try:
+                self.leaks_conn.execute('OPTIMIZE TABLE credentials FINAL')
+                final_count = self.leaks_conn.execute('SELECT count() FROM credentials')[0][0]
+                log.info(f"Import complete: {total_inserted:,} rows processed, {final_count:,} unique credentials in database")
+            except Exception as e:
+                log.warning(f"Deduplication pending (background): {e}")
+                log.info(f"Import complete: {total_inserted:,} credentials inserted, {total_skipped} files skipped")
+        else:
+            log.info(f"Import complete: no new credentials found, {total_skipped} files skipped")
+
+    def _insert_credentials_batch(self, batch):
+        """Insert a batch of credential tuples into ClickHouse."""
+        if not batch:
+            return
+        self.leaks_conn.execute(
+            'INSERT INTO credentials (mail_username, mail_domain, mail_tld, '
+            'password, uri_subdomain, uri_domain, uri_tld) VALUES',
+            batch,
+            types_check=True
+        )
 
     @cmd2.with_argparser(parser_set_ai)
     def do_set_ai(self, args):
@@ -2297,7 +2627,7 @@ with this command again, pointing to a directory containing credential files.
                 # Query ClickHouse for credentials using only username
                 query = """
                     SELECT DISTINCT password, uri_subdomain, uri_domain, uri_tld 
-                    FROM credentials 
+                    FROM credentials FINAL
                     WHERE mail_username = %(username)s
                 """
                 params = {'username': username}
@@ -2314,7 +2644,7 @@ with this command again, pointing to a directory containing credential files.
                         # Store the password with additional context in username_passwords table
                         context = f"{uri_subdomain}.{uri_domain}.{uri_tld}" if uri_subdomain else f"{uri_domain}.{uri_tld}"
                         sql = """
-                            INSERT INTO username_passwords (username, password, breach_context, company_id) 
+                            INSERT OR IGNORE INTO username_passwords (username, password, breach_context, company_id)
                             VALUES (?, ?, ?, ?)
                         """
                         cur.execute(sql, (username, password, context, self.company_id))
@@ -2340,7 +2670,7 @@ with this command again, pointing to a directory containing credential files.
                 # Query ClickHouse for credentials
                 query = """
                     SELECT password, uri_subdomain, uri_domain, uri_tld 
-                    FROM credentials 
+                    FROM credentials FINAL
                     WHERE mail_username = %(username)s 
                     AND mail_domain = %(domain)s 
                     AND mail_tld = %(tld)s
@@ -2363,7 +2693,7 @@ with this command again, pointing to a directory containing credential files.
                         # Store the password with additional context
                         context = f"{uri_subdomain}.{uri_domain}.{uri_tld}" if uri_subdomain else f"{uri_domain}.{uri_tld}"
                         sql = """
-                            INSERT INTO passwords (password, email_id, breach_context) 
+                            INSERT OR IGNORE INTO passwords (password, email_id, breach_context)
                             VALUES (?, ?, ?)
                         """
                         cur.execute(sql, (password, email_id, context))

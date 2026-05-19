@@ -30,7 +30,8 @@ emploleaks/
 │   └── hibp.py               # Plugin de HaveIBeenPwned (brechas)
 ├── utils/
 │   ├── logging_format.py     # Configuración de logging con colores
-│   └── ai_classifier.py     # Clasificación de roles con IA (OpenAI/Ollama)
+│   ├── ai_classifier.py      # Clasificación de roles con IA (OpenAI/Ollama)
+│   └── leak_parser.py        # Parser de archivos de leaks con detección AI
 ├── workflows/                # Scripts de automatización (legacy)
 │   ├── check_leaked_passwords.py
 │   └── get_public_repos.py
@@ -38,6 +39,7 @@ emploleaks/
 │   ├── docker-compose.yml
 │   └── config/
 │       └── users.xml
+├── leaks_data/               # Carpeta para archivos de leaks a importar (no en git)
 ├── config/                   # Configuración (autogenerado)
 │   └── tokens.ini            # Tokens y credenciales de plugins (no en git)
 ├── data/                     # Base de datos local (autogenerado)
@@ -120,9 +122,24 @@ python emploleaks.py -d
 
 | Comando | Descripción |
 |---------|-------------|
-| `connect_leaks --user <user> --passwd <pass> --dbname <db> [--host <host>] [--port <port>] [--secure]` | Conectar a la base de datos ClickHouse |
+| `connect_leaks` | Conectar a ClickHouse usando la configuración guardada en `tokens.ini` |
+| `connect_leaks --host <host> --port <port> --save` | Conectar con parámetros específicos y guardarlos para futuras sesiones |
 | `disconnect_leaks` | Desconectar de la base de datos ClickHouse |
-| `create_db --user <user> --passwd <pass> --dbname <db> [--host <host>] [--port <port>] [--secure] [--import-data <directorio>]` | Crear la base de datos ClickHouse e importar datos de credenciales |
+| `import_leaks [directorio]` | Importar archivos de credenciales a ClickHouse (default: `leaks_data/`) |
+| `import_leaks --no-ai` | Importar solo archivos con formato conocido, sin usar IA |
+| `create_db --user <user> --passwd <pass> --dbname <db> [--import-data <dir>]` | Crear la BD ClickHouse manualmente (legacy) |
+
+La conexión a ClickHouse se configura en `config/tokens.ini`:
+```ini
+[clickhouse]
+host = localhost
+port = 9000
+user = default
+passwd =
+dbname = credentials_db
+```
+
+Si ClickHouse está disponible al iniciar, la conexión se establece automáticamente. La base de datos y tabla se crean si no existen.
 
 ### Búsqueda de Credenciales y Brechas
 
@@ -276,22 +293,37 @@ Esto expone ClickHouse en:
 - Puerto `9000` (protocolo nativo TCP)
 - Puerto `8123` (interfaz HTTP)
 
-### Crear la base de datos e importar datos
+La carpeta `leaks_data/` se monta como volumen de solo lectura dentro del contenedor.
+
+### Importar credenciales
+
+1. Colocá tus archivos de leaks (`.txt`, `.csv`, `.dat`, `.zip`, `.gz`) en la carpeta `leaks_data/`.
+2. Ejecutá el comando de importación:
 
 ```
-emploleaks> create_db --user default --passwd "" --dbname credentials_db --host localhost --port 9000 --import-data /ruta/a/archivos/
+emploleaks> import_leaks
 ```
 
-El formato esperado de los archivos de importación es: `email:password:url` (un registro por línea, archivos `.txt`, `.csv` o `.dat`).
+El parser detecta automáticamente los formatos más comunes:
+- `email:password`
+- `email:password:url`
+- `email;password`
+- `email|password`
+- `url,email,password`
 
-### Conectarse y buscar credenciales
+Para formatos desconocidos, utiliza la IA configurada (OpenAI/Ollama) para analizar una muestra del archivo y determinar cómo parsearlo. Usá `--no-ai` para omitir la detección con IA.
+
+Archivos `.zip` y `.gz` se descomprimen automáticamente antes de parsear.
+
+### Buscar credenciales
 
 ```
-emploleaks> connect_leaks --user default --passwd "" --dbname credentials_db --host localhost --port 9000
 emploleaks(miempresa)> find_passwords only_emails
 emploleaks(miempresa)> find_passwords find_all
 emploleaks(miempresa)> print --data passwords
 ```
+
+Si ClickHouse está configurado en `tokens.ini`, la conexión es automática al iniciar la herramienta.
 
 ### Estructura de la tabla `credentials` en ClickHouse
 
@@ -342,8 +374,7 @@ emploleaks(miempresa)> print --data passwords
 
 9. print --data emails
 
-10. connect_leaks --user default --passwd "" --dbname credentials_db
-11. find_passwords only_emails
+10. find_passwords only_emails          # (ClickHouse se conecta automáticamente desde config)
 
 12. use --plugin hibp
 13. setopt apikey <hibp_key>

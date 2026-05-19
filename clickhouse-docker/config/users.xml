@@ -1,4 +1,4 @@
-<yandex>
+<clickhouse>
   <users>
     <default>
       <password></password>
@@ -31,4 +31,4 @@
       </interval>
     </default>
   </quotas>
-</yandex>
+</clickhouse>
