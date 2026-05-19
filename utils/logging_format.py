@@ -24,13 +24,15 @@ class CustomFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
-log = logging.getLogger('')
+log = logging.getLogger('emploleaks')
 log.setLevel(logging.INFO)
+log.propagate = False
 format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 format_stdout = CustomFormatter("%(message)s")
 
 ch = logging.StreamHandler(sys.stdout)
 ch.setFormatter(format_stdout)
+ch.setLevel(logging.INFO)
 log.addHandler(ch)
 
 if not os.path.isdir("logs"):

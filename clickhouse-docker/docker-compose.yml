@@ -1,0 +1,15 @@
+services:
+  clickhouse:
+    image: yandex/clickhouse-server:latest
+    container_name: clickhouse
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native TCP interface
+      - "9009:9009"  # Inter-server
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./config/users.xml:/etc/clickhouse-server/users.xml:ro
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:

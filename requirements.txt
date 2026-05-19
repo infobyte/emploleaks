@@ -23,3 +23,5 @@ termcolor==2.3.0
 tweepy==4.14.0
 urllib3==2.0.2
 wcwidth==0.2.6
+pyhibp
+tld>=0.13.1

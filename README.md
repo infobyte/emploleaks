@@ -1,256 +1,347 @@
-# 🔎 EmploLeaks
+# EmploLeaks
 
-This is a tool designed for Open Source Intelligence (OSINT) purposes, which helps to gather information about employees of a company.
+EmploLeaks es una herramienta de OSINT (Open Source Intelligence) con interfaz CLI interactiva, diseñada para descubrir y correlacionar información sobre empleados de una empresa objetivo. Permite recopilar perfiles de LinkedIn, generar emails corporativos potenciales, buscar credenciales filtradas en bases de datos de leaks (ClickHouse) y verificar brechas conocidas a través de HaveIBeenPwned. Toda la información se almacena localmente en SQLite para su análisis posterior.
 
-## 🚀 How it Works
+## Características
 
-The tool starts by searching through LinkedIn to obtain a list of employees of the company. Then, it looks for their social network profiles to find their personal email addresses. Finally, it uses those email addresses to search through  a custom COMB database to retrieve leaked passwords. You an easily add yours and connect to through the tool.
+- Búsqueda y enumeración de empleados desde LinkedIn (scraping con cookies de sesión)
+- Generación automática de emails corporativos potenciales con formatos personalizables
+- Búsqueda de credenciales filtradas en base de datos ClickHouse propia
+- Verificación de brechas conocidas con la API de HaveIBeenPwned
+- Escaneo de secretos en repositorios GitHub/GitLab con gitleaks
+- Almacenamiento local de toda la información en SQLite
+- Exportación de resultados a CSV
+- Sistema modular de plugins (LinkedIn, GitHub, HIBP)
+- Autoguardado y carga automática de configuración de plugins
 
-## 💻 Installation
-
-To use this tool, you'll need to have Python 3.10 installed on your machine. Clone this repository to your local machine and install the required dependencies using pip in the *cli* folder:
+## Estructura del Proyecto
 
 ```
-cd cli
+emploleaks/
+├── emploleaks.py             # Script principal (CLI interactiva con cmd2)
+├── requirements.txt          # Dependencias de Python
+├── README.md
+├── .gitignore
+├── plugins/
+│   ├── linkedin.py           # Plugin de LinkedIn (scraping de empleados)
+│   ├── github.py             # Plugin de GitHub (repos, stalk, secrets)
+│   └── hibp.py               # Plugin de HaveIBeenPwned (brechas)
+├── utils/
+│   └── logging_format.py     # Configuración de logging con colores
+├── workflows/                # Scripts de automatización (legacy)
+│   ├── check_leaked_passwords.py
+│   └── get_public_repos.py
+├── clickhouse-docker/        # Docker Compose para levantar ClickHouse
+│   ├── docker-compose.yml
+│   └── config/
+│       └── users.xml
+├── config/                   # Configuración (autogenerado)
+│   └── tokens.ini            # Tokens y credenciales de plugins (no en git)
+├── data/                     # Base de datos local (autogenerado)
+│   └── emploleaks.db         # SQLite con toda la información recopilada
+└── logs/                     # Archivos de log (autogenerado)
+    └── log.txt
+```
+
+## Requisitos
+
+- Python 3.8+
+- pip
+- Conexión a Internet
+- **Opcional:** Docker y Docker Compose (para levantar ClickHouse localmente)
+- **Opcional:** [gitleaks](https://github.com/gitleaks/gitleaks) (para escaneo de secretos en repos)
+- **Opcional:** API key de [HaveIBeenPwned](https://haveibeenpwned.com/API/Key)
+- Cookies de sesión de LinkedIn (`JSESSIONID` y `li_at`) para el plugin de LinkedIn
+
+## Instalación
+
+1. Clonar el repositorio:
+```bash
+git clone https://github.com/yourusername/emploleaks.git
+cd emploleaks
+```
+
+2. Instalar dependencias:
+```bash
 pip install -r requirements.txt
 ```
 
-### OSX
-We know that there is a problem when installing the tool due to the *psycopg2* binary. If you run into this problem, you can solve it running:
-
-```
-cd cli
-python3 -m pip install psycopg2-binary`
-```
-
-## 📈 Basic Usage
-
-To use the tool, simply run the following command:
-
-python3 cli/emploleaks.py
-
-If everything went well during the installation, you will be able to start using EmploLeaks:
-
-```
-___________              .__         .__                 __
-\_   _____/ _____ ______ |  |   ____ |  |   ____ _____  |  | __  ______
- |    __)_ /     \____  \|  |  /  _ \|  | _/ __ \__   \ |  |/ / /  ___/
- |        \  Y Y  \  |_> >  |_(  <_> )  |_\  ___/ / __ \|    <  \___ \
-/_______  /__|_|  /   __/|____/\____/|____/\___  >____  /__|_ \/____  >
-        \/      \/|__|                         \/     \/     \/     \/
-
-OSINT tool 🕵  to chain multiple apis
-emploleaks>
+3. (Opcional) Levantar ClickHouse con Docker para la base de datos de leaks:
+```bash
+cd clickhouse-docker
+docker compose up -d
+cd ..
 ```
 
-Right now, the tool supports two functionalities:
- - Linkedin, for searching all employees from a company and get their personal emails.
-    - A GitLab extension, which is capable of finding personal code repositories from the employees.
- - If defined and connected, when the tool is gathering employees profiles, a search to a COMB database will be made in order to retrieve leaked passwords.
+## Uso
 
+Ejecutar la herramienta:
+```bash
+python emploleaks.py
+```
 
-### Retrieving Linkedin Profiles
+Con modo debug:
+```bash
+python emploleaks.py -d
+```
 
-First, you must set the plugin to use, which in this case is *linkedin*. After, you should set your authentication tokens and the run the *impersonate* process:
+### Comandos Generales
+
+| Comando | Descripción |
+|---------|-------------|
+| `help` | Muestra la ayuda general |
+| `help <comando>` | Muestra la ayuda de un comando específico |
+| `quit` | Sale de la aplicación |
+
+### Gestión de Empresas
+
+| Comando | Descripción |
+|---------|-------------|
+| `add_company --name <nombre>` | Agrega una nueva empresa |
+| `select_company --name <nombre>` | Selecciona una empresa para trabajar |
+| `list_companies list` | Muestra todas las empresas |
+| `delete_company --name <nombre>` | Elimina una empresa y todos sus datos |
+
+### Gestión de Plugins
+
+| Comando | Descripción |
+|---------|-------------|
+| `use --plugin <nombre>` | Activa un plugin (`linkedin`, `github`, `hibp`) |
+| `deactivate` | Desactiva el plugin actual |
+| `show options` | Muestra las opciones del plugin activo |
+| `setopt <opción> [valor]` | Configura una opción del plugin (si no se pasa valor, se pide por prompt oculto) |
+| `autosave --enable / --disable` | Activa/desactiva el guardado automático de configuración en `config/tokens.ini` |
+| `autoload --enable / --disable` | Activa/desactiva la carga automática de configuración desde `config/tokens.ini` |
+
+### Conexión a Base de Datos de Leaks (ClickHouse)
+
+| Comando | Descripción |
+|---------|-------------|
+| `connect_leaks --user <user> --passwd <pass> --dbname <db> [--host <host>] [--port <port>] [--secure]` | Conectar a la base de datos ClickHouse |
+| `disconnect_leaks` | Desconectar de la base de datos ClickHouse |
+| `create_db --user <user> --passwd <pass> --dbname <db> [--host <host>] [--port <port>] [--secure] [--import-data <directorio>]` | Crear la base de datos ClickHouse e importar datos de credenciales |
+
+### Búsqueda de Credenciales y Brechas
+
+| Comando | Descripción |
+|---------|-------------|
+| `find_passwords <modo>` | Busca credenciales filtradas en ClickHouse. Modos: `find_all`, `only_usernames`, `only_emails` |
+| `find_passwords <modo> --email <email>` | Busca credenciales para un email específico |
+| `find_breaches` | Busca brechas en HIBP para todos los emails de la empresa (requiere plugin `hibp` activo) |
+
+### Visualización y Exportación
+
+| Comando | Descripción |
+|---------|-------------|
+| `print --data emails` | Muestra emails confirmados y potenciales |
+| `print --data passwords` | Muestra credenciales encontradas |
+| `print --data breaches` | Muestra brechas de HIBP |
+| `print --data gits` | Muestra cuentas de GitHub |
+| `print --data twitters` | Muestra cuentas de Twitter/X |
+| `print --data phones` | Muestra números de teléfono |
+| `print --data websites` | Muestra sitios web |
+| `print --data secrets` | Muestra secretos encontrados en repositorios |
+| `print --data all` | Muestra todo consolidado por empleado |
+| `print --data <tipo> --export` | Exporta los datos a un archivo CSV con timestamp |
+
+---
+
+## Plugins
+
+### LinkedIn
+
+Permite buscar empleados de una empresa en LinkedIn usando cookies de sesión del navegador, y generar emails corporativos potenciales.
+
+**Opciones:**
+
+| Opción | Descripción |
+|--------|-------------|
+| `JSESSIONID` | Cookie de sesión JSESSIONID de LinkedIn |
+| `li-at` | Cookie de sesión li_at de LinkedIn |
+| `hide` | Ocultar el valor de JSESSIONID al mostrarlo (default: `yes`) |
+
+**Comandos disponibles dentro del plugin:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `run impersonate` | Autenticar usando las cookies configuradas |
+| `run find <company_linkedin> <dominio_email> [--email-format FORMAT]` | Buscar empleados y generar emails |
+
+**Formatos de email disponibles:**
+- Por defecto: `f_last` (ej: `jsmith@domain.com`) y `f.last` (ej: `j.smith@domain.com`)
+- Custom con `--email-format`: usa placeholders `{n}` (inicial nombre), `{s}` (apellido), `{name}` (nombre completo), `{l}` (inicial apellido)
+  - Ejemplo: `--email-format {n}.{s}` genera `j.smith@domain.com`
+
+**Ejemplo completo:**
+```
+emploleaks> add_company --name miempresa
+emploleaks> select_company --name miempresa
+emploleaks(miempresa)> use --plugin linkedin
+emploleaks(miempresa)(linkedin)> setopt JSESSIONID
+JSESSIONID: <se ingresa oculto>
+emploleaks(miempresa)(linkedin)> setopt li-at
+li-at: <se ingresa oculto>
+emploleaks(miempresa)(linkedin)> run impersonate
+emploleaks(miempresa)(linkedin)> run find miempresa miempresa.com --email-format {n}.{s}
+```
+
+### GitHub
+
+Permite obtener información de perfiles GitHub, listar repositorios, y escanear secretos en repositorios con gitleaks.
+
+**Opciones:**
+
+| Opción | Descripción |
+|--------|-------------|
+| `token` | Token de acceso personal de GitHub |
+| `blur` | Ofuscar el token al mostrarlo |
+| `gitleaks_path` | Ruta al binario de gitleaks (default: `gitleaks` en PATH) |
+| `max_repo_size` | Tamaño máximo de repo a analizar en MB (default: `15`) |
+
+**Comandos disponibles dentro del plugin:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `run stalk <username>` | Obtener email de una cuenta GitHub |
+| `run get_repos <username>` | Listar repositorios públicos de un usuario |
+| `run find_secrets` | Escanear secretos en repos de empleados de la empresa |
+| `run find_secrets --download-all` | Igual pero sin límite de tamaño |
+
+**Ejemplo completo:**
+```
+emploleaks(miempresa)> use --plugin github
+emploleaks(miempresa)(github)> setopt token ghp_xxxxxxxxxxxx
+emploleaks(miempresa)(github)> run find_secrets
+emploleaks(miempresa)(github)> print --data secrets
+```
+
+### HaveIBeenPwned (HIBP)
+
+Verifica si los emails de la empresa aparecen en brechas conocidas usando la API de HIBP.
+
+**Opciones:**
+
+| Opción | Descripción |
+|--------|-------------|
+| `apikey` | API key de HaveIBeenPwned |
+| `rate_limit` | Delay entre llamadas a la API en segundos (default: `2.0`) |
+
+**Comandos disponibles dentro del plugin:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `run find_breaches` | Buscar brechas para todos los emails de la empresa |
+| `find_breaches` | Comando directo (equivalente, requiere plugin hibp activo) |
+
+**Ejemplo completo:**
+```
+emploleaks(miempresa)> use --plugin hibp
+emploleaks(miempresa)(hibp)> setopt apikey <tu_api_key>
+emploleaks(miempresa)(hibp)> find_breaches
+emploleaks(miempresa)(hibp)> print --data breaches
+```
+
+---
+
+## Base de Datos de Leaks (ClickHouse)
+
+EmploLeaks puede conectarse a una base de datos ClickHouse propia con credenciales filtradas para buscar passwords asociados a los emails/usernames de los empleados descubiertos.
+
+### Levantar ClickHouse con Docker
+
+```bash
+cd clickhouse-docker
+docker compose up -d
+```
+
+Esto expone ClickHouse en:
+- Puerto `9000` (protocolo nativo TCP)
+- Puerto `8123` (interfaz HTTP)
+
+### Crear la base de datos e importar datos
 
 ```
-emploleaks> use --plugin linkedin
-emploleaks(linkedin)> setopt JSESSIONID
-JSESSIONID: 
+emploleaks> create_db --user default --passwd "" --dbname credentials_db --host localhost --port 9000 --import-data /ruta/a/archivos/
+```
+
+El formato esperado de los archivos de importación es: `email:password:url` (un registro por línea, archivos `.txt`, `.csv` o `.dat`).
+
+### Conectarse y buscar credenciales
+
+```
+emploleaks> connect_leaks --user default --passwd "" --dbname credentials_db --host localhost --port 9000
+emploleaks(miempresa)> find_passwords only_emails
+emploleaks(miempresa)> find_passwords find_all
+emploleaks(miempresa)> print --data passwords
+```
+
+### Estructura de la tabla `credentials` en ClickHouse
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `mail_username` | String | Parte del usuario del email |
+| `mail_domain` | String | Dominio del email (sin TLD) |
+| `mail_tld` | String | TLD del email |
+| `password` | String | Contraseña filtrada |
+| `uri_subdomain` | String | Subdominio del sitio donde se filtró |
+| `uri_domain` | String | Dominio del sitio |
+| `uri_tld` | String | TLD del sitio |
+
+---
+
+## Estructura de la Base de Datos Local (SQLite)
+
+| Tabla | Descripción |
+|-------|-------------|
+| `companies` | Empresas registradas |
+| `employees` | Empleados descubiertos (nombre, título, empresa) |
+| `emails` | Emails confirmados (obtenidos de contact_info de LinkedIn) |
+| `potential_emails` | Emails potenciales generados por formato |
+| `passwords` | Contraseñas encontradas asociadas a emails |
+| `username_passwords` | Contraseñas encontradas por username |
+| `breaches` | Brechas de HIBP asociadas a emails |
+| `githubs` | URLs de perfiles/repos GitHub |
+| `twitters` | URLs de perfiles Twitter/X |
+| `phones` | Números de teléfono |
+| `websites` | Sitios web personales |
+| `secrets_repos` | Secretos encontrados en repositorios con gitleaks |
+
+---
+
+## Flujo de Trabajo Típico
+
+```
+1. python emploleaks.py
+
+2. add_company --name target_corp
+3. select_company --name target_corp
+
+4. use --plugin linkedin
+5. setopt JSESSIONID <cookie>
+6. setopt li-at <cookie>
+7. run impersonate
+8. run find target_corp targetcorp.com --email-format {n}.{s}
+
+9. print --data emails
+
+10. connect_leaks --user default --passwd "" --dbname credentials_db
+11. find_passwords only_emails
+
+12. use --plugin hibp
+13. setopt apikey <hibp_key>
+14. find_breaches
+
+15. use --plugin github
+16. setopt token <github_token>
+17. run find_secrets
+
+18. print --data all --export
+```
+
+## Disclaimer
+
+Esta herramienta está diseñada únicamente para fines educativos, de investigación en seguridad y pruebas de penetración autorizadas. El uso de esta herramienta para actividades maliciosas o no autorizadas está estrictamente prohibido. Los usuarios son responsables de cumplir con todas las leyes y términos de servicio aplicables.
+
+emploleaks(f)(linkedin)> setopt JSESSIONID ajax:2879580135233792831
 [+] Updating value successfull
-emploleaks(linkedin)> setopt li-at
-li-at: 
-[+] Updating value successfull
-emploleaks(linkedin)> show options
-Module options:
-
-Name        Current Setting                      Required    Description
-----------  -----------------------------------  ----------  -----------------------------------
-hide        yes                                  no          hide the JSESSIONID field
-JSESSIONID  **************************           no          active cookie session in browser #1
-li-at       AQEDAQ74B0YEUS-_AAABilIFFBsAAAGKdhG  no          active cookie session in browser #1
-            YG00AxGP34jz1bRrgAcxkXm9RPNeYIAXz3M
-            cycrQm5FB6lJ-Tezn8GGAsnl_GRpEANRdPI
-            lWTRJJGF9vbv5yZHKOeze_WCHoOpe4ylvET
-            kyCyfN58SNNH
-emploleaks(linkedin)> run impersonate
-[+] Using cookies from the browser
-Setting for first time JSESSIONID
-Setting for first time li_at
-```
-
-li\_at and JSESSIONID are the authentication cookies of your LinkedIn session on the browser. You can use the Web Developer Tools to get it, just sign-in normally at LinkedIn and press right click and Inspect, those cookies will be in the Storage tab.
-
-Now that the module is configured, you can run it and start gathering information from the company:
-
-```
-emploleaks(linkedin)> run find EvilCorp
-⠙ Gathering Information[+] Added 1 new names.
-💻 Listing profiles:
- 0: 
-	full name: Joaquin Rodriguez Viruliento
-	profile name: joaquinrodriguezviruliento
-	occupation: Security Researcher at EvilCorp
-	public identifier: joaquinrodriguezviruliento
-	urn: urn:li:member:15736913
-✔ Getting and processing contact info of "Joaquin Rodriguez Viruliento"
-	Contact info:
-		website 0. http://www.evilcorp.com
-		twitter 0. limpiamicerca
-
-✔ Done
-
-```
-
-### Get Linkedin accounts + Leaked Passwords
-
-We created a custom *workflow*, where with the information retrieved by Linkedin, we try to match employees' personal emails to potential leaked passwords. In this case, you can connect to a database (in our case we have a custom indexed COMB database) using the *connect* command, as it is shown below:
-
-```
-emploleaks(linkedin)> connect --user myuser --passwd mypass123 --dbname mydbname --host 1.2.3.4
-[+] Connecting to the Leak Database...
-[*] version: PostgreSQL 12.15
-```
-
-Once it's connected, you can run the *workflow*. With all the users gathered, the tool will try to search in the database if a leaked credential is affecting someone:
-
-```
-emploleaks(linkedin)> run_pyscript workflows/check_leaked_passwords.py EvilCorp
-[-] Failing login... trying again!
-[-] Failing login... trying again!
-[+] Connected to the LinkedIn api successfull
-The following command could take a couple of minutes, be patient
- Listing profiles:
-✔ Getting and processing contact info of "señor girafales"
-✔ Getting and processing contact info of "kiko"
-✔ Getting and processing contact info of "el chavo del 8"
-[...]
-[+] Password for "señor girafales" exists
-[*] Email: girafales@gmail.com
-+------------------+
-| passwords leaked |
-+------------------+
-| laFQqAOSL69      |
-+------------------+
-```
-
-As a conclusion, the tool will generate a console output with the following information:
-
-- A list of employees of the company (obtained from LinkedIn)
-- The social network profiles associated with each employee (obtained from email address)
-- A list of leaked passwords associated with each email address.
-
-## 📰 How to build the indexed COMB database
-
-An imortant aspect of this project is the use of the indexed COMB database, to build your version you need to [download the torrent first](comb.torrent). Be careful, because the files and the indexed version downloaded requires, at least, 400 GB of disk space available.
-
-Once the torrent has been completelly downloaded you will get a file folder as following:
-
-```
-├── count_total.sh
-├── data
-│   ├── 0
-│   ├── 1
-│   │   ├── 0
-│   │   ├── 1
-│   │   ├── 2
-│   │   ├── 3
-│   │   ├── 4
-│   │   ├── 5
-│   │   ├── 6
-│   │   ├── 7
-│   │   ├── 8
-│   │   ├── 9
-│   │   ├── a
-│   │   ├── b
-│   │   ├── c
-│   │   ├── d
-│   │   ├── e
-│   │   ├── f
-│   │   ├── g
-│   │   ├── h
-│   │   ├── i
-│   │   ├── j
-│   │   ├── k
-│   │   ├── l
-│   │   ├── m
-│   │   ├── n
-│   │   ├── o
-│   │   ├── p
-│   │   ├── q
-│   │   ├── r
-│   │   ├── s
-│   │   ├── symbols
-│   │   ├── t
-```
-
-At this point, you could import all those files with the command `create_db`:
-
-```
-emploleaks> create_db --dbname leakdb --user leakdb_user --passwd leakdb_pass --comb /home/pasta/Downloads/comb
-[*] The full database occups more than 200 GB, take this in account
-[*] Creating the database
-ERROR:  database "leakdb" already exists
-ERROR:  role "leakdb_user" already exists 
-ALTER ROLE
-ALTER DATABASE
-GRANT
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-ALTER SYSTEM
-[+] Connecting to the Leak Database...
-[+] Importing from /home/pasta/Downloads/comb/data/1/m
-[+] Importing from /home/pasta/Downloads/comb/data/1/d
-[+] Importing from /home/pasta/Downloads/comb/data/1/v
-[+] Importing from /home/pasta/Downloads/comb/data/1/0
-[+] Importing from /home/pasta/Downloads/comb/data/1/8
-[+] Importing from /home/pasta/Downloads/comb/data/1/u
-[+] Importing from /home/pasta/Downloads/comb/data/1/k
-[+] Importing from /home/pasta/Downloads/comb/data/1/r
-[+] Importing from /home/pasta/Downloads/comb/data/1/7
-[+] Importing from /home/pasta/Downloads/comb/data/1/h
-[+] Importing from /home/pasta/Downloads/comb/data/1/o
-[+] Importing from /home/pasta/Downloads/comb/data/1/t
-[+] Importing from /home/pasta/Downloads/comb/data/1/f
-[+] Importing from /home/pasta/Downloads/comb/data/1/n
-[+] Importing from /home/pasta/Downloads/comb/data/1/symbols
-[+] Importing from /home/pasta/Downloads/comb/data/1/g
-[+] Importing from /home/pasta/Downloads/comb/data/1/q
-[+] Importing from /home/pasta/Downloads/comb/data/1/a
-[+] Importing from /home/pasta/Downloads/comb/data/1/e
-[+] Importing from /home/pasta/Downloads/comb/data/1/l                            
-[+] Importing from /home/pasta/Downloads/comb/data/1/y                            
-[+] Importing from /home/pasta/Downloads/comb/data/1/s                            
-[+] Importing from /home/pasta/Downloads/comb/data/1/3                            
-[+] Importing from /home/pasta/Downloads/comb/data/1/6                            
-[*] Creating index... 
-```
-
-The importer takes a lot of time for that reason we recommend to run it with patience.
-
-## 📌 Next Steps
-
-We are integrating other public sites and applications that may offer about a leaked credential. We may not be able to see the plaintext password, but it will give an insight if the user has any compromised credential:
- 
- - Integration with Have I Been Pwned?
- - Integration with Firefox Monitor
- - Integration with Leak Check
- - Integration with BreachAlarm
-
- Also, we will be focusing on gathering even more information from public sources of every employee. Do you have any idea in mind? Don't hesitate to reach us:
-
-  - Javi Aguinaga: jaguinaga@faradaysec.com
-  - Gabi Franco: gabrielf@faradaysec.com
-
- Or you con DM at [@pastacls](https://twitter.com/pastacls) or [@gaaabifranco](https://twitter.com/gaaabifranco) on Twitter.
-
-## 📝 License
-
-This tool is licensed under the MIT License. See the `LICENSE` file for more information.
+emploleaks(f)(linkedin)> setopt li-at AQEDAWXbSjMB0js_AAABnPxoCDEAAAGdIHSMMU0AFhUxs-qYd0Qia0eXL0pM8KOTciw7vPZSBus-yak5NiDqjXeUf6S5OG2WVVEJ79GtCdcDmbTa9HGYN2g87JzuXuEcm8m2ouhFqEDyeytpVpuP3Buq
