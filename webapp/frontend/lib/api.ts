@@ -56,6 +56,11 @@ export interface SocialProfile {
   source_email: string | null;
 }
 
+export interface EmployeeSocialProfile {
+  platform: string;
+  url: string | null;
+}
+
 export interface Employee {
   employee_id: number;
   name: string | null;
@@ -69,6 +74,7 @@ export interface Employee {
   websites: string[];
   githubs: string[];
   twitters: string[];
+  social_profiles: EmployeeSocialProfile[];
   has_breaches: boolean;
   has_credentials: boolean;
   has_secrets: boolean;

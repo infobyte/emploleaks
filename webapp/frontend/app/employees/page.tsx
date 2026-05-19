@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/core";
 import DeptColumn from "@/components/DeptColumn";
 import EmployeeCard from "@/components/EmployeeCard";
-import { Search, Plus, Sparkles, RefreshCw } from "lucide-react";
+import { Search, Plus, Sparkles, RefreshCw, Globe } from "lucide-react";
 
 export default function EmployeesPage() {
   const companyId = useCompanyId();
@@ -26,6 +26,7 @@ export default function EmployeesPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [newDept, setNewDept] = useState("");
   const [classifying, setClassifying] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -144,6 +145,20 @@ export default function EmployeesPage() {
     }
   };
 
+  const handleLookup = async () => {
+    if (!companyId) return;
+    setLookingUp(true);
+    try {
+      const result = await api.lookupSocialProfiles(companyId);
+      load();
+      alert(`Found ${result.found} social profiles across ${result.emails_checked} emails`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Lookup failed");
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
   const activeEmployee = activeId ? employees.find((e) => e.employee_id === activeId) : null;
 
   if (loading) {
@@ -178,6 +193,16 @@ export default function EmployeesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {employees.length > 0 && (
+            <button
+              onClick={handleLookup}
+              disabled={lookingUp}
+              className="inline-flex items-center gap-1.5 bg-bg-secondary border border-border text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-bg-hover transition-colors disabled:opacity-50"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              {lookingUp ? "Looking up..." : "Lookup Social"}
+            </button>
+          )}
           {!hasDepts && employees.length > 0 && (
             <button
               onClick={handleClassify}

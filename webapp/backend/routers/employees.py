@@ -54,6 +54,9 @@ async def _build_employee(db, emp) -> dict:
     sec = await db.execute_fetchall("SELECT count() FROM secrets_repos WHERE employee_id = ?", (eid,))
     has_secrets = sec[0][0] > 0
 
+    socials = await db.execute_fetchall(
+        "SELECT DISTINCT platform, url FROM social_profiles WHERE employee_id = ? ORDER BY platform", (eid,))
+
     return {
         "employee_id": eid,
         "name": emp["name"],
@@ -67,6 +70,7 @@ async def _build_employee(db, emp) -> dict:
         "websites": [r[0] for r in websites_r],
         "githubs": [r[0] for r in githubs_r],
         "twitters": [r[0] for r in twitters_r],
+        "social_profiles": [{"platform": r[0], "url": r[1]} for r in socials],
         "has_breaches": has_breaches,
         "has_credentials": has_credentials,
         "has_secrets": has_secrets,

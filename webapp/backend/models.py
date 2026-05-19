@@ -32,6 +32,11 @@ class DashboardOut(BaseModel):
     findings: list[Finding]
 
 
+class EmployeeSocialProfile(BaseModel):
+    platform: str
+    url: Optional[str] = None
+
+
 class EmployeeOut(BaseModel):
     employee_id: int
     name: Optional[str] = None
@@ -45,6 +50,7 @@ class EmployeeOut(BaseModel):
     websites: list[str] = []
     githubs: list[str] = []
     twitters: list[str] = []
+    social_profiles: list[EmployeeSocialProfile] = []
     has_breaches: bool = False
     has_credentials: bool = False
     has_secrets: bool = False
